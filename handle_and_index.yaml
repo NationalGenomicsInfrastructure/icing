@@ -1,0 +1,14 @@
+handles:
+    prefix: "TTAGTCTCCGACGGCAGGCTTCAAT"
+    postfix: "ACGCACCCACCGGGACTCAG"
+indexes: [
+    "ACAGTC",
+    "TGATGC",
+    "GTCGAT",
+    "TGAGTG",
+    "GTACTG",
+    "TAGCTG",
+    "AGTCTG",
+    "TCACGT",
+    "TCTCAG"
+]
