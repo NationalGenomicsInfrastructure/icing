@@ -13,8 +13,6 @@ if(!params.reference) {
 fastq = file(params.sample)
 base = fastq.getBaseName()
 
-
-
 reference = file(params.reference)
 referenceIdx = file(params.reference+".fai")
 referenceAmb= file(params.reference+".amb")
@@ -50,4 +48,14 @@ process mapBWA {
 }
 
 
+process selectCandidate {
+    input:
+    file HLAalignment
 
+    output:
+    file '*.candidates'
+
+    """
+    python ${workflow.launchDir}/selectCandidate.py -b ${HLAalignment} -r ${reference} > ${base}.candidates
+    """
+}
