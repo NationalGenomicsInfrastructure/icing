@@ -59,3 +59,12 @@ process selectCandidate {
     python ${workflow.launchDir}/selectCandidate.py -b ${HLAalignment} -r ${reference} > ${base}.candidates
     """
 }
+
+/*
+    TODO:
+    - add demultiplexing to the very beginning
+    - Extract reads mapped to the candidate genomic references separately
+    - feed each read set to cuna and generate consensuses
+    - select best consensuses
+    - black magic starts when you are finding the best match from IMGT/HLA to your consensus 
+ */
