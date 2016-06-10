@@ -41,6 +41,7 @@ process mapBWA {
 
     output:
     file '*.bam' into HLAalignment
+    file '*.bam' into HLAbam
 
     """
     bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | samtools view -bS -t ${reference} - | samtools sort - > ${base}.bam
@@ -53,13 +54,28 @@ process selectCandidate {
     file HLAalignment
 
     output:
-    file '*.candidates'
+    file '*.candidates' into candidates
 
     """
     python ${workflow.launchDir}/selectCandidate.py -b ${HLAalignment} -r ${reference} > ${base}.candidates
     """
 }
 
+process extractReads {
+    
+    module 'samtools'
+
+    input:
+    file HLAbam
+    file candidates
+
+    output:
+    file '*.cnd.fastq' into readsets
+
+    """
+    for f in `awk '{print \$1}' ${candidates}`; do echo \$f; samtools index ${HLAbam} ; samtools view -bh ${HLAbam} \${f}":" -o ${base}_\${f}.bam; picard-tools SamToFastq I=${base}_\${f}.bam F=${base}"_"\${f}".cnd.fastq"; done
+    """
+}
 /*
     TODO:
     - add demultiplexing to the very beginning
