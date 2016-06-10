@@ -72,15 +72,36 @@ process extractReads {
     output:
     file '*.cnd.fastq' into readsets
 
+    /*
+        This relatively long line of script 
+        - generates index for the resulting BAM
+        - gets the candidate names from the previous result file
+        - extracts reads into a BAM that are mapped to the candidate
+        - extracts reads into a FASTQ from the BAM
+        We should get a FASTQ for each candidate
+     */
     """
-    for f in `awk '{print \$1}' ${candidates}`; do echo \$f; samtools index ${HLAbam} ; samtools view -bh ${HLAbam} \${f}":" -o ${base}_\${f}.bam; picard-tools SamToFastq I=${base}_\${f}.bam F=${base}"_"\${f}".cnd.fastq"; done
+    samtools index ${HLAbam}; for f in `awk '{print \$1}' ${candidates}`; do echo \$f;  samtools view -bh ${HLAbam} \${f}":" -o ${base}_\${f}.bam; picard-tools SamToFastq I=${base}_\${f}.bam F=${base}"_"\${f}".cnd.fastq"; done
+    """
+}
+
+process generateConsensuses {
+    input:
+    file reads from readsets
+
+    output:
+    file '*fasta' consensuses
+
+    shell:
+    """
+    for f in ${reads}; do /home/szilva/dev/canu/Linux-amd64/bin/canu -p \${f}.canu -d \${f}.canu genomeSize=15000 -nanopore-raw \${f}; \
+    cp \${f}.canu/\${f}.canu.unassembled.fasta \${f}.fasta ; done
     """
 }
 /*
     TODO:
-    - add demultiplexing to the very beginning
-    - Extract reads mapped to the candidate genomic references separately
     - feed each read set to cuna and generate consensuses
     - select best consensuses
     - black magic starts when you are finding the best match from IMGT/HLA to your consensus 
+    - add demultiplexing to the very beginning
  */
