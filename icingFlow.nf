@@ -1,6 +1,8 @@
 #!/usr/bin/env nextflow
 /*
     Nextflow script for HLA typing from Oxford Nanopore amplicon reads
+		run as 
+		nextflow run icingFlow.nf --reference A_gen.fasta --sample reads.fastq
  */
 if (!params.sample) {
   exit 1, "Please specify the sample FASTQ file containing 2D reads only."
@@ -25,7 +27,7 @@ referenceSa= file(params.reference+".sa")
 process mapBWA {
     module 'bioinfo-tools'
     module 'samtools/1.3'
-    module 'bwa'
+    module 'bwa/0.7.15'
 
     cpus 4
 
@@ -90,12 +92,11 @@ process generateConsensuses {
     file reads from readsets
 
     output:
-    file '*fasta' consensuses
+    file '*fasta' into consensuses 
 
     shell:
     """
-    for f in ${reads}; do /home/szilva/dev/canu/Linux-amd64/bin/canu -p \${f}.canu -d \${f}.canu genomeSize=15000 -nanopore-raw \${f}; \
-    cp \${f}.canu/\${f}.canu.unassembled.fasta \${f}.fasta ; done
+    for f in ${reads}; do (/home/szilva/dev/canu/Linux-amd64/bin/canu useGrid=false -p \${f}.canu -d \${f}.canu genomeSize=15000 -nanopore-raw \${f} && cp \${f}.canu/\${f}.canu.unassembled.fasta \${f}.fasta ) || echo \$f" failed to assemble"; done
     """
 }
 /*
