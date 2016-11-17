@@ -17,12 +17,13 @@ base = fastq.getBaseName()
 
 reference = file(params.reference)
 referenceIdx = file(params.reference+".fai")
-referenceAmb= file(params.reference+".amb")
-referenceAnn= file(params.reference+".ann")
-referenceBwt= file(params.reference+".bwt")
-referenceFai= file(params.reference+".fai")
-referencePac= file(params.reference+".pac")
-referenceSa= file(params.reference+".sa")
+referenceAmb = file(params.reference+".amb")
+referenceAnn = file(params.reference+".ann")
+referenceBwt = file(params.reference+".bwt")
+referenceFai = file(params.reference+".fai")
+referencePac = file(params.reference+".pac")
+referenceSa = file(params.reference+".sa")
+outDirName = reference.getBaseName()
 
 process mapBWA {
     module 'bioinfo-tools'
@@ -87,7 +88,11 @@ process extractReads {
     """
 }
 
+// generating consensuses, and saving parts containing reads
+// the funny bash part is to get rid of failed consensus building runs
 process generateConsensuses {
+		publishDir "ContigsAndReads_" + outDirName
+
     input:
     file reads from readsets
 
@@ -99,9 +104,26 @@ process generateConsensuses {
     for f in ${reads}; do (/home/szilva/dev/canu/Linux-amd64/bin/canu useGrid=false -p \${f}.canu -d \${f}.canu genomeSize=15000 -nanopore-raw \${f} && cp \${f}.canu/\${f}.canu.unassembled.fasta \${f}.fasta ) || echo \$f" failed to assemble"; done
     """
 }
+
+// Now we are selecting consensuses, where there are more reads assigned to the result
+process pruneContigs {
+    publishDir "ContigsAndReads_" + outDirName
+
+    input:
+    file cont from consensuses
+    
+    output:
+    file '*.pruned.fasta' into prunedContigs
+
+    """
+    # 
+    awk '/>/ && \$3 !~/reads=[1-9]\$/{print FILENAME,\$0}' ${consensuses} |awk -F"[:.]" '{print \$3}'| sort -u    
+
+    """
+}
+
 /*
     TODO:
-    - feed each read set to cuna and generate consensuses
     - select best consensuses
     - black magic starts when you are finding the best match from IMGT/HLA to your consensus 
     - add demultiplexing to the very beginning
