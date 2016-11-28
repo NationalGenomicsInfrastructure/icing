@@ -30,7 +30,7 @@ process mapBWA {
     module 'samtools/1.3'
     module 'bwa/0.7.15'
 
-    cpus 4
+    cpus 6
 
     input:
     file reference
@@ -43,85 +43,105 @@ process mapBWA {
     file referenceSa
 
     output:
-    file '*.bam' into HLAalignment
+    file '*.pileup' into HLApileup
     file '*.bam' into HLAbam
 
     """
-    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | samtools view -bS -t ${reference} - | samtools sort - > ${base}.bam
+    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | \
+    samtools view -bS -t ${reference} - | \
+    samtools sort - | \
+    tee ${base}.bam | \
+    samtools mpileup -uf ${reference} - > ${base}.pileup
     """
 }
 
-
-process selectCandidate {
-    input:
-    file HLAalignment
-
-    output:
-    file '*.candidates' into candidates
-
-    """
-    python ${workflow.launchDir}/selectCandidate.py -b ${HLAalignment} -r ${reference} > ${base}.candidates
-    """
-}
-
-process extractReads {
-    
-    module 'samtools'
+process getConsensuses {
+    publishDir "rawCons"
+    module 'bcftools/1.3'
 
     input:
-    file HLAbam
-    file candidates
+    file pileup from HLApileup 
 
     output:
-    file '*.cnd.fastq' into readsets
+    file "cons.fastq" into consensusFASTQ
 
-    /*
-        This relatively long line of script 
-        - generates index for the resulting BAM
-        - gets the candidate names from the previous result file
-        - extracts reads into a BAM that are mapped to the candidate
-        - extracts reads into a FASTQ from the BAM
-        We should get a FASTQ for each candidate
-     */
+    script: 
     """
-    samtools index ${HLAbam}; for f in `awk '{print \$1}' ${candidates}`; do echo \$f;  samtools view -bh ${HLAbam} \${f}":" -o ${base}_\${f}.bam; picard-tools SamToFastq I=${base}_\${f}.bam F=${base}"_"\${f}".cnd.fastq"; done
+    bcftools call -c ${pileup} --ploidy 1| vcfutils.pl vcf2fq > cons.fastq
     """
-}
+} 
 
-// generating consensuses, and saving parts containing reads
-// the funny bash part is to get rid of failed consensus building runs
-process generateConsensuses {
-		publishDir "ContigsAndReads_" + outDirName
-
+process selectConsensusCandidate {
+    // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
     input:
-    file reads from readsets
+    file cfq from consensusFASTQ
 
     output:
-    file '*fasta' into consensuses 
-
-    shell:
-    """
-    for f in ${reads}; do (/home/szilva/dev/canu/Linux-amd64/bin/canu useGrid=false -p \${f}.canu -d \${f}.canu genomeSize=15000 -nanopore-raw \${f} && cp \${f}.canu/\${f}.canu.unassembled.fasta \${f}.fasta ) || echo \$f" failed to assemble"; done
-    """
-}
-
-// Now we are selecting consensuses, where there are more reads assigned to the result
-process pruneContigs {
-    publishDir "ContigsAndReads_" + outDirName
-
-    input:
-    file cont from consensuses
-    
-    output:
-    file '*.pruned.fasta' into prunedContigs
+    file "${base}.candidates.fasta" into candidates
 
     """
-    # 
-    awk '/>/ && \$3 !~/reads=[1-9]\$/{print FILENAME,\$0}' ${consensuses} |awk -F"[:.]" '{print \$3}'| sort -u    
-
+    python ${workflow.launchDir}/selectCandidate.py -c ${cfq} > ${base}.candidates.fasta
     """
 }
-
+//
+//process extractReads {
+//    
+//    module 'samtools'
+//
+//    input:
+//    file HLAbam
+//    file candidates
+//
+//    output:
+//    file '*.cnd.fastq' into readsets
+//
+//    /*
+//        This relatively long line of script 
+//        - generates index for the resulting BAM
+//        - gets the candidate names from the previous result file
+//        - extracts reads into a BAM that are mapped to the candidate
+//        - extracts reads into a FASTQ from the BAM
+//        We should get a FASTQ for each candidate
+//     */
+//    """
+//    samtools index ${HLAbam}; for f in `awk '{print \$1}' ${candidates}`; do echo \$f;  samtools view -bh ${HLAbam} \${f}":" -o ${base}_\${f}.bam; picard-tools SamToFastq I=${base}_\${f}.bam F=${base}"_"\${f}".cnd.fastq"; done
+//    """
+//}
+//
+//// generating consensuses, and saving parts containing reads
+//// the funny bash part is to get rid of failed consensus building runs
+//process generateConsensuses {
+//    publishDir "ContigsAndReads_" + outDirName
+//
+//    input:
+//    file reads from readsets
+//
+//    output:
+//    file '*fasta' into consensuses 
+//
+//    shell:
+//    """
+//    samtools mpileup -uf ../ON0526/IMGT/A_gen.fasta 1_All_BC01.bam > BC01.mpileup
+//    """
+//}
+//
+//// Now we are selecting consensuses, where there are more reads assigned to the result
+//process pruneContigs {
+//    publishDir "ContigsAndReads_" + outDirName
+//
+//    input:
+//    file cont from consensuses
+//    
+//    output:
+//    file '*.pruned.fasta' into prunedContigs
+//
+//    """
+//    # 
+//    awk '/>/ && \$3 !~/reads=[1-9]\$/{print FILENAME,\$0}' ${consensuses} |awk -F"[:.]" '{print \$3}'| sort -u    
+//
+//    """
+//}
+//
 /*
     TODO:
     - select best consensuses
