@@ -73,6 +73,8 @@ process getConsensuses {
 
 process selectConsensusCandidate {
     // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
+
+    publishDir "candidates"
     input:
     file cfq from consensusFASTQ
 
@@ -80,7 +82,8 @@ process selectConsensusCandidate {
     file "${base}.candidates.fasta" into candidates
 
     """
-    python ${workflow.launchDir}/selectCandidate.py -c ${cfq} > ${base}.candidates.fasta
+    echo "Hajra"
+    python ${workflow.launchDir}/selectCandidate.py -c ${cfq} -l 2000 -a 50 > ${base}.candidates.fasta
     """
 }
 //
