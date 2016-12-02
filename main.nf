@@ -79,13 +79,14 @@ process selectConsensusCandidate {
     file cfq from consensusFASTQ
 
     output:
-    file "${base}.candidates.fasta" into candidates
+    file "*.candidate.fasta" into candidates
 
     """
-    echo "Hajra"
-    python ${workflow.launchDir}/selectCandidate.py -c ${cfq} -l 2000 -a 50 > ${base}.candidates.fasta
+    python ${workflow.launchDir}/selectCandidate.py -c ${cfq} -l 2000 -a 50 
     """
 }
+
+
 //
 //process extractReads {
 //    

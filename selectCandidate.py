@@ -61,7 +61,7 @@ def main():
     skewedCandidates = selectSkewedCandidates(hqCandidates)
     for record in skewedCandidates:
         # print out without the extra newline
-        print(record.format("fasta"), end="")
+        SeqIO.write(record,record.id + "_" +os.path.basename(args.pileupFASTQ) + ".candidate.fasta", "fasta")
 
 if __name__ == '__main__':
     main()
