@@ -60,8 +60,10 @@ def main():
     # select sequences where the base quality distribution is right skewed (are skewness is negative)
     skewedCandidates = selectSkewedCandidates(hqCandidates)
     for record in skewedCandidates:
-        # print out without the extra newline
-        SeqIO.write(record,record.id + "_" +os.path.basename(args.pileupFASTQ) + ".candidate.fasta", "fasta")
+        # have to change ":"s in filenames
+        seqID = record.id.replace(":","_")
+        fileName = seqID + "_" + os.path.basename(args.pileupFASTQ) + ".candidate.fasta"
+        SeqIO.write(record,fileName, "fasta")
 
 if __name__ == '__main__':
     main()

@@ -25,52 +25,54 @@ referencePac = file(params.reference+".pac")
 referenceSa = file(params.reference+".sa")
 outDirName = reference.getBaseName()
 
-process mapBWA {
-    module 'bioinfo-tools'
-    module 'samtools/1.3'
-    module 'bwa/0.7.15'
+//process mapBWA {
+//    module 'bioinfo-tools'
+//    module 'samtools/1.3'
+//    module 'bwa/0.7.15'
+//
+//    cpus 6
+//
+//    input:
+//    file reference
+//    file referenceIdx
+//    file referenceAmb
+//    file referenceAnn
+//    file referenceBwt
+//    file referenceFai
+//    file referencePac
+//    file referenceSa
+//
+//    output:
+//    file '*.pileup' into HLApileup
+//    file '*.bam' into HLAbam
+//
+//    """
+//    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | \
+//    samtools view -bS -t ${reference} - | \
+//    samtools sort - | \
+//    tee ${base}.bam | \
+//    samtools mpileup -uf ${reference} - > ${base}.pileup
+//    """
+//}
+//
+//process getConsensuses {
+//    publishDir "rawCons"
+//    module 'bcftools/1.3'
+//
+//    input:
+//    file pileup from HLApileup 
+//
+//    output:
+//    file "cons.fastq" into consensusFASTQ
+//
+//    script: 
+//    """
+//    bcftools call -c ${pileup} --ploidy 1| vcfutils.pl vcf2fq > cons.fastq
+//    """
+//} 
+//
 
-    cpus 6
-
-    input:
-    file reference
-    file referenceIdx
-    file referenceAmb
-    file referenceAnn
-    file referenceBwt
-    file referenceFai
-    file referencePac
-    file referenceSa
-
-    output:
-    file '*.pileup' into HLApileup
-    file '*.bam' into HLAbam
-
-    """
-    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | \
-    samtools view -bS -t ${reference} - | \
-    samtools sort - | \
-    tee ${base}.bam | \
-    samtools mpileup -uf ${reference} - > ${base}.pileup
-    """
-}
-
-process getConsensuses {
-    publishDir "rawCons"
-    module 'bcftools/1.3'
-
-    input:
-    file pileup from HLApileup 
-
-    output:
-    file "cons.fastq" into consensusFASTQ
-
-    script: 
-    """
-    bcftools call -c ${pileup} --ploidy 1| vcfutils.pl vcf2fq > cons.fastq
-    """
-} 
-
+consensusFASTQ = file("rawCons/cons.fastq")
 process selectConsensusCandidate {
     // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
 
@@ -85,70 +87,30 @@ process selectConsensusCandidate {
     python ${workflow.launchDir}/selectCandidate.py -c ${cfq} -l 2000 -a 50 
     """
 }
+// make two lists of candidates so we can have a Cartesian product and
+// we will be able to calculate all the distances
+(s1,s2) = candidates.flatten().into(2)
+// make the cartesian, but leave out entries, where the indexes are equal
+doublePairs = s1.spread(s2).filter{it[0] != it[1]}
+// now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
+// and store only unique entries
+singlePairs = doublePairs.map { x -> x.sort() }.unique()
+process calculateSimilarity {
+    publishDir "distanceMatrix", mode: 'copy'
 
+    input:
+    set file(seq1), file(seq2) from singlePairs 
 
-//
-//process extractReads {
-//    
-//    module 'samtools'
-//
-//    input:
-//    file HLAbam
-//    file candidates
-//
-//    output:
-//    file '*.cnd.fastq' into readsets
-//
-//    /*
-//        This relatively long line of script 
-//        - generates index for the resulting BAM
-//        - gets the candidate names from the previous result file
-//        - extracts reads into a BAM that are mapped to the candidate
-//        - extracts reads into a FASTQ from the BAM
-//        We should get a FASTQ for each candidate
-//     */
-//    """
-//    samtools index ${HLAbam}; for f in `awk '{print \$1}' ${candidates}`; do echo \$f;  samtools view -bh ${HLAbam} \${f}":" -o ${base}_\${f}.bam; picard-tools SamToFastq I=${base}_\${f}.bam F=${base}"_"\${f}".cnd.fastq"; done
-//    """
-//}
-//
-//// generating consensuses, and saving parts containing reads
-//// the funny bash part is to get rid of failed consensus building runs
-//process generateConsensuses {
-//    publishDir "ContigsAndReads_" + outDirName
-//
-//    input:
-//    file reads from readsets
-//
-//    output:
-//    file '*fasta' into consensuses 
-//
-//    shell:
-//    """
-//    samtools mpileup -uf ../ON0526/IMGT/A_gen.fasta 1_All_BC01.bam > BC01.mpileup
-//    """
-//}
-//
-//// Now we are selecting consensuses, where there are more reads assigned to the result
-//process pruneContigs {
-//    publishDir "ContigsAndReads_" + outDirName
-//
-//    input:
-//    file cont from consensuses
-//    
-//    output:
-//    file '*.pruned.fasta' into prunedContigs
-//
-//    """
-//    # 
-//    awk '/>/ && \$3 !~/reads=[1-9]\$/{print FILENAME,\$0}' ${consensuses} |awk -F"[:.]" '{print \$3}'| sort -u    
-//
-//    """
-//}
-//
-/*
-    TODO:
-    - select best consensuses
-    - black magic starts when you are finding the best match from IMGT/HLA to your consensus 
-    - add demultiplexing to the very beginning
- */
+    output:
+    file "*.dist" into distances
+
+    script:
+    """
+    needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
+        -asequence $seq1 \
+        -bsequence $seq2 |\
+     awk '/HLA/{print }'|\
+     tr -d "()" > $seq1"_"$seq2".dist"
+    """
+}
+
