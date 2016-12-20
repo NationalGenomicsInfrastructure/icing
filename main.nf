@@ -26,6 +26,8 @@ referenceSa = file(params.reference+".sa")
 outDirName = reference.getBaseName()
 
 process mapBWA {
+    publishDir "rawAlignment"
+
     module 'bioinfo-tools'
     module 'samtools/1.3'
     module 'bwa/0.7.15'
@@ -71,8 +73,8 @@ process getConsensuses {
     """
 } 
 
-
 //consensusFASTQ = file("rawCons/cons.fastq")
+//HLAbam = file("rawAlignment/BC01.fastq.bam")
 process selectConsensusCandidate {
     // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
 
@@ -87,6 +89,7 @@ process selectConsensusCandidate {
     python ${workflow.launchDir}/selectCandidate.py -c ${cfq} -l 2000 -a 50 
     """
 }
+
 // All this magic is to calculate only the upper triangle of the distance matrix (since 
 // it is symetrical and the main diagonals are all zeros).
 //
@@ -107,7 +110,6 @@ process calculateSimilarity {
     output:
     file "*_*.dist" into distances
 
-  //  beforeScript 'rm -rf consensus.dist'
     script:
     """
     needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
@@ -119,7 +121,6 @@ process calculateSimilarity {
 }
 
 allDistances = distances.collectFile(){it -> "${it} "}
-allDistances = allDistances.view{"bugger $it"}
 
 process selectMostDistantSequences {
     publishDir "mostDistant"
@@ -128,13 +129,45 @@ process selectMostDistantSequences {
     set file(dist) from allDistances
 
     output:
-    file "candidates.txt" into sortedCandidates
+    file "sorted.candidates.txt" into sortedCandidateDistances
+    file "most.distant.candidates.txt" into mostDistantCandidates 
 
     script:
     """
     for f in `cat $dist`; do
-        cat \$f >> candidates.txt
-    done 
+        cat \$f 
+    done |\
+    sort -k4n > sorted.candidates.txt
+    tail -1 sorted.candidates.txt |awk '{printf("%s\\n%s",\$1,\$2)}' > most.distant.candidates.txt
     """
 }
 
+// now in the very last line of the "sorted.candidates.txt" file we have 
+// the name of the two most distant candidates. Providing the consensuses are
+// commensurable (they have similar length and quality) we are extracting reads that are
+// - able to align to one of these most distant candidates (this should be OK 
+//   by filtering reads only to aligned to the candidate reference)
+// - are at least $minReadLength long
+// - are not soft-clipped (alignedLength > readLength * $minAlignedRatio where minAlignedRatio is between [0,1]
+mostDistantCandidates = mostDistantCandidates.view{"mostDistantCandidates $it"}
+
+process extractReadsForBestCandidates {
+    publishDir "candidateReads"
+    module 'samtools/1.3'
+
+    input:
+    set file(alignment) from HLAbam
+    set file(cIds) from mostDistantCandidates
+
+    output:
+    file "*sam" into candidateReads
+
+    script:
+    """
+    samtools index $alignment
+    for id in `cat $cIds`; do
+        samtools view -h $alignment "HLA:\${id}:" > \${id}.sam
+    done
+    # TODO: process SAM files, get rid of low QC reads
+    """
+}
