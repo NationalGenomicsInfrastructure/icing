@@ -6,6 +6,7 @@ from Bio import SeqIO
 import numpy
 import matplotlib.pyplot as plt
 import scipy.stats.stats as stats
+import copy
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Selecting genomic sequence candidates from consensus FASTQ generated from samtools pileup')
@@ -65,6 +66,20 @@ def getRecords(pileupFASTQ):
 
     #return (rec for rec in SeqIO.parse(pileupFASTQ, "fastq") if min(rec.letter_annotations["phred_quality"]) >= 30)
 
+def makePairs(candidates):
+    pairs = []
+    if len(candidates) == 1:
+        clone = copy.deepcopy(candidates[0])
+        clone.id = clone.id + "clone"
+        clone.name = clone.name + "clone"
+        clone.description = clone.description + "clone"
+        candidates.append(clone)
+        for c in candidates:
+            print(c)
+        
+    return candidates
+    
+
 def main():
     # parse command line
     args = parse_args()
@@ -75,7 +90,10 @@ def main():
     hqCandidates = selectHQCandidates(longCandidates, int(args.averageLimit))
     # select sequences where the base quality distribution is right skewed (are skewness is negative)
     skewedCandidates = selectSkewedCandidates(hqCandidates)
-    for record in skewedCandidates:
+    # in some cases there is only a single candidate (i.e. homozygous or hemizygous cases, like DRB1,4,7 etc)
+    # we have to be sure we are emitting a pair, not a single candidate (the same allele in those cases)
+    pairs = makePairs(skewedCandidates)
+    for record in pairs:
         # have to change ":"s in filenames
         seqID = record.id.replace(":","_")
         fileName = seqID + "_" + os.path.basename(args.pileupFASTQ) + ".candidate.fasta"
