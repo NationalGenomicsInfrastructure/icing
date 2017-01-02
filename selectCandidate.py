@@ -15,13 +15,19 @@ def parse_args():
     return parser.parse_args()
 
 def selectLongCandidates(fastqRecords, shortestContig):
-    return (rec for rec in fastqRecords if len(rec) >= shortestContig )
+    lc = []
+    for rec in fastqRecords:
+        #print("%s %d" % (rec.id, len(rec)))
+        if len(rec) >= shortestContig:
+            lc.append(rec)
+    return lc
+    #return (rec for rec in fastqRecords if len(rec) >= shortestContig )
 
 def selectHQCandidates(fastqRecords, averageLimit):
     hqR = []
     for record in fastqRecords:
+        #print(record.id + " ###########################################################################")
         phred = record.letter_annotations["phred_quality"]
-#        print record.id + " ###########################################################################"
 #        print "average: " + str(numpy.average(phred))
 #        print "mean: " + str(numpy.mean(phred))
 #        print "median: " + str(numpy.median(phred))
@@ -36,7 +42,7 @@ def selectSkewedCandidates(fastqRecords):
     skR = []
     for record in fastqRecords:
         phred = record.letter_annotations["phred_quality"]
-        #print "skewness: " + str(stats.skew(phred))
+        #print ("skewness: " + str(stats.skew(phred))
         if stats.skew(phred) < 0.0:
             skR.append(record)
 #        print "kurtosis: " + str(stats.kurtosis(phred))
@@ -47,7 +53,17 @@ def selectSkewedCandidates(fastqRecords):
     return skR
 
 def getRecords(pileupFASTQ):
-    return (rec for rec in SeqIO.parse(pileupFASTQ, "fastq") if min(rec.letter_annotations["phred_quality"]) >= 30)
+    fqRec = []
+    for rec in SeqIO.parse(pileupFASTQ, "fastq"):
+        #print("%s %f" % (rec.id, numpy.median(rec.letter_annotations["phred_quality"]) ))
+        try:
+            if numpy.median(rec.letter_annotations["phred_quality"]) >= 25:
+                fqRec.append(rec)
+        except AttributeError:
+           pass 
+    return fqRec
+
+    #return (rec for rec in SeqIO.parse(pileupFASTQ, "fastq") if min(rec.letter_annotations["phred_quality"]) >= 30)
 
 def main():
     # parse command line
