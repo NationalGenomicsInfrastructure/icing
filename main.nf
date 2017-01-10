@@ -16,6 +16,10 @@ if(!params.minReadLength) {
     exit 1, "Please provide minimal read length to consider at final consensus build (usually the half of the length of the expected reference is a good guess)"
 }
 
+if(!params.minContigLength || !params.minAvgQuality) {
+    exit 1, "Please provide minimal contig length and minimal average quality (use the length of the locus and 40 as an initial guess) "
+}
+
 fastq = file(params.sample)
 base = fastq.getBaseName()//.replaceFirst(/.fastq/, "")
 locus = file(params.reference).getBaseName().replaceFirst(/.fasta/, "")
@@ -32,49 +36,115 @@ referencePac = file(params.reference+".pac")
 referenceSa = file(params.reference+".sa")
 outDirName = reference.getBaseName()
 
-process mapBWA {
-    publishDir "rawAlignment"+resultSuffix
-
-    module 'bioinfo-tools'
-    module 'samtools/1.3'
-    module 'bwa/0.7.15'
-
-    cpus 6
-
-    input:
-    file reference
-    file referenceIdx
-    file referenceAmb
-    file referenceAnn
-    file referenceBwt
-    file referenceFai
-    file referencePac
-    file referenceSa
-
-    output:
-    file '*.pileup' into HLApileup
-    file '*.bam' into HLAbam
-
-    """
-    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | \
-    samtools view -bS -t ${reference} - | \
-    samtools sort - | \
-    tee ${base}.bam | \
-    samtools mpileup -uf ${reference} - > ${base}.pileup
-    """
-}
+//process mapBWA {
+//    publishDir "rawAlignment"+resultSuffix
+//
+//    module 'bioinfo-tools'
+//    module 'samtools/1.3'
+//    module 'bwa/0.7.15'
+//
+//    cpus 6
+//
+//    input:
+//    file reference
+//    file referenceIdx
+//    file referenceAmb
+//    file referenceAnn
+//    file referenceBwt
+//    file referenceFai
+//    file referencePac
+//    file referenceSa
+//
+//    output:
+//    file '*.pileup' into HLApileup
+//    file '*.bam' into HLAbam
+//
+//    """
+//    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | \
+//    samtools view -bS -t ${reference} - | \
+//    samtools sort - | \
+//    tee ${base}.bam | \
+//    samtools mpileup -uf ${reference} - > ${base}.pileup
+//    """
+//}
 
 // when using pre-calculated BAM and pileup, start by adding --pileup FILE.pileup --bam FILE.bam
 
-//HLAbam = file(params.bam)
-//HLApileup = file(params.pileup)
+HLAbam = file(params.bam)
+HLApileup = file(params.pileup)
+
+// here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
+// generally we are ignoring reads that are containing more mismatches then the 10% of the expected minimal contig size
+editDist = params.minContigLength.toInteger()/10
+process filterBestMatchingReads {
+    publishDir "bestMatchingReads"+resultSuffix, mode:'copy'
+    module 'samtools/1.3'
+
+    input:
+    file bam from HLAbam
+
+    output:
+    file "filtered_${params.bam}" into filteredBam
+
+    script:
+    """
+    bamtools filter -tag "NM:<${editDist}" -in ${HLAbam}  -out "filtered_"${params.bam} 
+    """
+}
+
+// Here we are running some stats on the bam files and trying to get only alleles
+// with nice coverage. The rest of the crap is thrown away
+process selectAllelesWithDecentCoverage {
+    publishDir "goodCoverage"+resultSuffix
+    module 'samtools/1.3'
+
+    input:
+    file fbam from filteredBam
+
+    output:
+    file "candidate.stats" into stats
+    file "mergedDC.bam" into dcBam
+    
+    script:
+    """
+    # - get the allele names from the BAM header, 
+    # - calculate coverage depth for each position of each allele, but only using reads that are at least minReadLength long
+    # - calculate statistics, and select the best 16 alleles (no point to get more)
+    # - create a BAM file that contains only long reads and the best alleles
+    SCRIPTDIR=`dirname ${workflow.scriptFile}`
+    samtools index ${fbam}
+    for allele in `samtools view -H ${fbam} | awk '/^@SQ/{print \$2}'| sed 's/SN://g'`; do 
+                samtools depth -a -l ${params.minReadLength} ${fbam} -r \${allele}: > \${allele}.coverage; 
+                python \${SCRIPTDIR}/binCoverage.py -f \${allele}.coverage; 
+    done | sort -k3n | tail -8 > candidate.stats
+    for allele in `awk '{print \$1}' candidate.stats`; do 
+        samtools view -hb ${fbam} \${allele}: > FHB\${allele}.bam
+    done
+    samtools merge -@8 mergedDC.bam FHB*bam
+    """
+}
+
+process makePileUp {
+    publishDir "pileup"+resultSuffix, mode:'copy'
+
+    input: 
+    file fb from dcBam 
+
+    output:
+    file "${base}.pileup" into filteredPileup
+
+    script:
+    """
+    samtools mpileup -uf ${reference} ${fb} > ${base}.pileup
+    """
+}
 
 process getConsensuses {
     publishDir "rawCons"+resultSuffix
     module 'bcftools/1.3'
 
     input:
-    file pileup from HLApileup 
+    file pileup from filteredPileup
 
     output:
     file "cons.fastq" into consensusFASTQ
@@ -99,10 +169,10 @@ process selectConsensusCandidate {
     file "*.candidate.fasta" into candidates
 
     """
-    python ${workflow.launchDir}/selectCandidate.py -c ${cfq} -l 2000 -a 50 
+    python ${workflow.projectDir}/selectCandidate.py -c ${cfq} -l ${params.minContigLength} -a ${params.minAvgQuality} 
     """
 }
-candidates = candidates.view{"Candidates "+it}
+//candidates = candidates.view{"Candidates "+it}
 // What if there is a single candidate? 
 
 
@@ -170,7 +240,7 @@ process selectMostDistantSequences {
 mostDistantCandidates = mostDistantCandidates.view{"mostDistantCandidates $it"}
 
 process extractReadsForBestCandidates {
-    publishDir "candidateReads"+resultSuffix
+    publishDir "candidateReads"+resultSuffix, mode: 'copy'
     module 'samtools/1.3'
 
     input:
