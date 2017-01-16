@@ -14,6 +14,6 @@ statinfo = os.stat(args.coverage)
 if statinfo.st_size > 0L:
     cover = np.loadtxt(args.coverage,usecols=[2])
     (mean, median, std, var) = np.mean(cover), np.median(cover),np.std(cover), np.var(cover)
-    if median >= float(args.minMedian):
+    if median >= 0: #float(args.minMedian):
         print("%s\t%4.2f\t%4.2f\t%4.2f\t%4.2f") % (args.coverage.replace(".coverage",""), mean, median, std, var)
 

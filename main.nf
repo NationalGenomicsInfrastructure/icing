@@ -36,42 +36,46 @@ referencePac = file(params.reference+".pac")
 referenceSa = file(params.reference+".sa")
 outDirName = reference.getBaseName()
 
-//process mapBWA {
-//    publishDir "rawAlignment"+resultSuffix
-//
-//    module 'bioinfo-tools'
-//    module 'samtools/1.3'
-//    module 'bwa/0.7.15'
-//
-//    cpus 6
-//
-//    input:
-//    file reference
-//    file referenceIdx
-//    file referenceAmb
-//    file referenceAnn
-//    file referenceBwt
-//    file referenceFai
-//    file referencePac
-//    file referenceSa
-//
-//    output:
-//    file '*.pileup' into HLApileup
-//    file '*.bam' into HLAbam
-//
-//    """
-//    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} | \
-//    samtools view -bS -t ${reference} - | \
-//    samtools sort - | \
-//    tee ${base}.bam | \
-//    samtools mpileup -uf ${reference} - > ${base}.pileup
-//    """
-//}
+process mapBWA {
+    publishDir "rawAlignment"+resultSuffix
 
-// when using pre-calculated BAM and pileup, start by adding --pileup FILE.pileup --bam FILE.bam
+    module 'bioinfo-tools'
+    module 'samtools/1.3'
+    module 'bwa/0.7.15'
 
-HLAbam = file(params.bam)
-HLApileup = file(params.pileup)
+    cpus 6
+
+    input:
+    file reference
+    file referenceIdx
+    file referenceAmb
+    file referenceAnn
+    file referenceBwt
+    file referenceFai
+    file referencePac
+    file referenceSa
+
+    output:
+    file '*.bam' into HLAbam
+    file '*.bai' into HLAbai
+
+    """
+    set -eo pipefail
+    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} -a | \
+    samtools view -bS -t ${reference} - | \
+    samtools sort -  > ${base}.bam 
+    samtools index ${base}.bam
+    """
+}
+
+// when using pre-calculated BAM, start by adding --bam FILE.bam
+
+fHLAbam = Channel.create()
+rawHLAbam = Channel.create()
+
+//HLAbam = file(params.bam)
+//HLAbam.separate(fHLAbam, rawHLAbam){ a -> [a,a] }
+
 
 // here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
 // generally we are ignoring reads that are containing more mismatches then the 10% of the expected minimal contig size
@@ -84,11 +88,11 @@ process filterBestMatchingReads {
     file bam from HLAbam
 
     output:
-    file "filtered_${params.bam}" into filteredBam
+    file "filtered_${bam}" into filteredBam
 
     script:
     """
-    bamtools filter -tag "NM:<${editDist}" -in ${HLAbam}  -out "filtered_"${params.bam} 
+    samtools view -h -m ${params.minReadLength} -bS ${bam} | bamtools filter -tag "AS:>1000" -in - -out "filtered_"${bam} 
     """
 }
 
@@ -116,7 +120,7 @@ process selectAllelesWithDecentCoverage {
     for allele in `samtools view -H ${fbam} | awk '/^@SQ/{print \$2}'| sed 's/SN://g'`; do 
                 samtools depth -a -l ${params.minReadLength} ${fbam} -r \${allele}: > \${allele}.coverage; 
                 python \${SCRIPTDIR}/binCoverage.py -f \${allele}.coverage; 
-    done | sort -k3n | tail -8 > candidate.stats
+    done | sort -k3n | tail -16 > candidate.stats
     for allele in `awk '{print \$1}' candidate.stats`; do 
         samtools view -hb ${fbam} \${allele}: > FHB\${allele}.bam
     done
@@ -126,6 +130,7 @@ process selectAllelesWithDecentCoverage {
 
 process makePileUp {
     publishDir "pileup"+resultSuffix, mode:'copy'
+    module 'samtools/1.3'
 
     input: 
     file fb from dcBam 
@@ -188,7 +193,7 @@ doublePairs = s1.spread(s2).filter{it[0] != it[1]}
 // now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
 // and store only unique entries
 singlePairs = doublePairs.map { x -> x.sort() }.unique()
-singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
+//singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
 process calculateSimilarity {
     publishDir "distanceMatrix"+resultSuffix, mode: 'copy'
 
@@ -239,24 +244,24 @@ process selectMostDistantSequences {
 
 mostDistantCandidates = mostDistantCandidates.view{"mostDistantCandidates $it"}
 
-process extractReadsForBestCandidates {
-    publishDir "candidateReads"+resultSuffix, mode: 'copy'
-    module 'samtools/1.3'
-
-    input:
-    set file(alignment) from HLAbam
-    set file(cIds) from mostDistantCandidates
-
-    output:
-    file "*bam" into candidateReads
-    file "*bai" into candidateReadIndexes
-
-    script:
-    """
-    samtools index $alignment
-    for id in `cat $cIds`; do
-        samtools view -h $alignment "HLA:\${id}:" | samtools view -h -m ${params.minReadLength} -bS - | bamtools filter -tag "AS:>1000" -in - -out \${id}.bam
-        samtools index \${id}.bam
-    done
-    """
-}
+//process extractReadsForBestCandidates {
+//    publishDir "candidateReads"+resultSuffix, mode: 'copy'
+//    module 'samtools/1.3'
+//
+//    input:
+//    set file(alignment) from rawHLAbam
+//    set file(cIds) from mostDistantCandidates
+//
+//    output:
+//    file "*bam" into candidateReads
+//    file "*bai" into candidateReadIndexes
+//
+//    script:
+//    """
+//    samtools index $alignment
+//    for id in `cat $cIds`; do
+//        samtools view -h $alignment "HLA:\${id}:" | samtools view -h -m ${params.minReadLength} -bS - | bamtools filter -tag "AS:>1000" -in - -out \${id}.bam
+//        samtools index \${id}.bam
+//    done
+//    """
+//}
