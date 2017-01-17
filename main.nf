@@ -27,6 +27,8 @@ resultSuffix = "_"+base.replaceFirst(/.fastq/, "")+"_"+params.locus
 refChannel = Channel.fromPath( params.refDir + '/HLA*.fasta')
 
 process mapBWA {
+    tag {params.locus + " " + ref + " " + fastq}
+
     module 'bioinfo-tools'
     module 'samtools/1.3'
     module 'bwa/0.7.15'
