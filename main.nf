@@ -48,7 +48,7 @@ process mapBWA {
 }
 
 process mergeBAMs {
-    publishDir "rawAlignment"+resultSuffix, mode: 'copy'
+    publishDir "ICING_rawAlignment"+resultSuffix, mode: 'copy'
 
     module 'samtools/1.3'
    
@@ -76,7 +76,7 @@ process mergeBAMs {
 //// generally we are ignoring reads that are containing more mismatches then the 10% of the expected minimal contig size
 editDistance = params.minContigLength.toInteger() - params.minContigLength.toInteger()/10
 process filterBestMatchingReads {
-    publishDir "bestMatchingReads"+resultSuffix, mode:'copy'
+    publishDir "ICING_bestMatchingReads"+resultSuffix, mode:'copy'
     module 'samtools/1.3'
 
     input:
@@ -94,7 +94,7 @@ process filterBestMatchingReads {
 // Here we are running some stats on the bam files and trying to get only alleles
 // with nice coverage. The rest of the crap is thrown away
 process selectAllelesWithDecentCoverage {
-    publishDir "goodCoverage"+resultSuffix
+    publishDir "ICING_goodCoverage"+resultSuffix
     module 'samtools/1.3'
 
     input:
@@ -122,58 +122,53 @@ process selectAllelesWithDecentCoverage {
     samtools merge -@8 mergedDC.bam FHB*bam
     """
 }
-//
-//process makePileUp {
-//    publishDir "pileup"+resultSuffix, mode:'copy'
-//    module 'samtools/1.3'
-//
-//    input: 
-//    file fb from dcBam 
-//
-//    output:
-//    file "${base}.pileup" into filteredPileup
-//
-//    script:
-//    """
-//    samtools mpileup -B -d 10000 -Q 10 -A ${fb} > ${base}.pileup
-//    """
-//}
-//
-//process getConsensuses {
-//    publishDir "rawCons"+resultSuffix
-//    module 'bcftools/1.3'
-//
-//    input:
-//    file pileup from filteredPileup
-//
-//    output:
-//    file "cons.fasta" into consensusFASTA
-//
-//    script: 
-//    """
-//    #bcftools call -c ${pileup} | vcfutils.pl vcf2fq > cons.fastq
-//    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d 8 > cons.fasta 
-//    """
-//} 
-//
-////consensusFASTQ = file("results/cons.fastq")
-//
-//process selectConsensusCandidate {
-//    // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
-//
-//    publishDir "candidates"+resultSuffix
-//    input:
-//    file cf from consensusFASTA
-//
-//    output:
-//    file "*.candidate.fasta" into candidatesFASTA
-//    file "*.candidate.aln" into candidatesALN
-//
-//    """
-//    python ${workflow.projectDir}/selectCandidate.py -c ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
-//    mafft --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
-//    """
-//}
+
+process makePileUp {
+    publishDir "ICING_pileup"+resultSuffix, mode:'copy'
+    module 'samtools/1.3'
+
+    input: 
+    file fb from dcBam 
+
+    output:
+    file "${base}.pileup" into filteredPileup
+
+    script:
+    """
+    samtools mpileup -B -d 1000 -Q 10 -A ${fb} > ${base}.pileup
+    """
+}
+
+process getConsensuses {
+    publishDir "ICING_rawCons"+resultSuffix
+
+    input:
+    file pileup from filteredPileup
+
+    output:
+    file "cons.fasta" into consensusFASTA
+
+    script: 
+    """
+    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d 8 > cons.fasta 
+    """
+} 
+
+process selectConsensusCandidate {
+
+    publishDir "ICING_candidates"+resultSuffix
+    input:
+    file cf from consensusFASTA
+
+    output:
+    file "*.candidate.fasta" into candidatesFASTA
+    file "*.candidate.aln" into candidatesALN
+
+    """
+    python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
+    mafft --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
+    """
+}
 ////candidates = candidates.view{"Candidates "+it}
 //// What if there is a single candidate? 
 //
