@@ -16,8 +16,8 @@ if(!params.minReadLength) {
     exit 1, "Please provide minimal read length to consider at final consensus build (usually the half of the length of the expected reference is a good guess)"
 }
 
-if(!params.minContigLength || !params.minAvgQuality) {
-    exit 1, "Please provide minimal contig length and minimal average quality (use the length of the locus and 40 as an initial guess) "
+if(!params.minContigLength ) {
+    exit 1, "Please provide minimal contig length (use the length of the locus as an initial guess) "
 }
 
 fastq = file(params.sample)
@@ -62,8 +62,12 @@ process mapBWA {
     """
     set -eo pipefail
     bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} -a | \
-    samtools view -bS -t ${reference} - | \
-    samtools sort -  > ${base}.bam 
+    samtools view -bS -T ${reference} - | \
+    samtools sort -  > flags2fix.bam 
+    samtools view -H flags2fix.bam > header
+    samtools view flags2fix.bam | awk 'OFS="\t"{if(\$2==256 || \$2==2048) \$2=0; if(\$2==272 || \$2==2064) \$2=16; print \$0}' > fakeflags.sam
+    cat header fakeflags.sam | samtools view -bS - > ${base}.bam
+    rm -rf flags2fix.bam fakeflags.sam
     samtools index ${base}.bam
     """
 }
@@ -140,7 +144,7 @@ process makePileUp {
 
     script:
     """
-    samtools mpileup -uf ${reference} ${fb} > ${base}.pileup
+    samtools mpileup -B -d 10000 -Q 10 -A ${fb} > ${base}.pileup
     """
 }
 
@@ -152,12 +156,12 @@ process getConsensuses {
     file pileup from filteredPileup
 
     output:
-    file "cons.fastq" into consensusFASTQ
+    file "cons.fasta" into consensusFASTA
 
     script: 
     """
-    #bcftools call -c ${pileup} --ploidy 1| vcfutils.pl vcf2fq > cons.fastq
-    bcftools call -c ${pileup} | vcfutils.pl vcf2fq > cons.fastq
+    #bcftools call -c ${pileup} | vcfutils.pl vcf2fq > cons.fastq
+    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d 8 > cons.fasta 
     """
 } 
 
@@ -168,13 +172,15 @@ process selectConsensusCandidate {
 
     publishDir "candidates"+resultSuffix
     input:
-    file cfq from consensusFASTQ
+    file cf from consensusFASTA
 
     output:
-    file "*.candidate.fasta" into candidates
+    file "*.candidate.fasta" into candidatesFASTA
+    file "*.candidate.aln" into candidatesALN
 
     """
-    python ${workflow.projectDir}/selectCandidate.py -c ${cfq} -l ${params.minContigLength} -a ${params.minAvgQuality} 
+    python ${workflow.projectDir}/selectCandidate.py -c ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
+    mafft --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
     """
 }
 //candidates = candidates.view{"Candidates "+it}
@@ -187,7 +193,7 @@ process selectConsensusCandidate {
 //
 // make two lists of candidates so we can have a Cartesian product and
 // we will be able to calculate all the distances
-(s1,s2,toSelectFrom) = candidates.flatten().into(3)
+(s1,s2,toSelectFrom) = candidatesFASTA.flatten().into(3)
 // make the cartesian, but leave out entries where the indexes are equal
 doublePairs = s1.spread(s2).filter{it[0] != it[1]}
 // now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
