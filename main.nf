@@ -31,7 +31,7 @@ process mapBWA {
     module 'samtools/1.3'
     module 'bwa/0.7.15'
 
-    cpus 24
+    cpus 6
 
     input:
     file ref from refChannel
@@ -155,8 +155,10 @@ process getConsensuses {
 } 
 
 process selectConsensusCandidate {
-
     publishDir "ICING_candidates"+resultSuffix
+
+    cpus 6
+
     input:
     file cf from consensusFASTA
 
@@ -166,44 +168,44 @@ process selectConsensusCandidate {
 
     """
     python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
-    mafft --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
+    mafft --thread ${task.cpus} --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
     """
 }
-////candidates = candidates.view{"Candidates "+it}
-//// What if there is a single candidate? 
+//candidates = candidates.view{"Candidates "+it}
+// What if there is a single candidate? 
+
+
+
+// All this magic is to calculate only the upper triangle of the distance matrix (since 
+// it is symetrical and the main diagonals are all zeros).
 //
-//
-//
-//// All this magic is to calculate only the upper triangle of the distance matrix (since 
-//// it is symetrical and the main diagonals are all zeros).
-////
-//// make two lists of candidates so we can have a Cartesian product and
-//// we will be able to calculate all the distances
-//(s1,s2,toSelectFrom) = candidatesFASTA.flatten().into(3)
-//// make the cartesian, but leave out entries where the indexes are equal
-//doublePairs = s1.spread(s2).filter{it[0] != it[1]}
-//// now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
-//// and store only unique entries
-//singlePairs = doublePairs.map { x -> x.sort() }.unique()
-////singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
-//process calculateSimilarity {
-//    publishDir "distanceMatrix"+resultSuffix, mode: 'copy'
-//
-//    input:
-//    set file(seq1), file(seq2) from singlePairs 
-//
-//    output:
-//    file "*_*.dist" into distances
-//
-//    script:
-//    """
-//    needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
-//        -asequence $seq1 \
-//        -bsequence $seq2 |\
-//     awk '/HLA/{print }'|\
-//     tr -d "()" > $seq1"_"$seq2".dist"
-//    """
-//}
+// make two lists of candidates so we can have a Cartesian product and
+// we will be able to calculate all the distances
+(s1,s2,toSelectFrom) = candidatesFASTA.flatten().into(3)
+// make the cartesian, but leave out entries where the indexes are equal
+doublePairs = s1.spread(s2).filter{it[0] != it[1]}
+// now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
+// and store only unique entries
+singlePairs = doublePairs.map { x -> x.sort() }.unique()
+singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
+process calculateSimilarity {
+    publishDir "ICING_distanceMatrix"+resultSuffix, mode: 'copy'
+
+    input:
+    set file(seq1), file(seq2) from singlePairs 
+
+    output:
+    file "*_*.dist" into distances
+
+    script:
+    """
+    needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
+        -asequence $seq1 \
+        -bsequence $seq2 |\
+     awk '/HLA/{print }'|\
+     tr -d "()" > $seq1"_"$seq2".dist"
+    """
+}
 //
 //allDistances = distances.collectFile(){it -> "${it} "}
 //
