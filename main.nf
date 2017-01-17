@@ -31,7 +31,7 @@ process mapBWA {
     module 'samtools/1.3'
     module 'bwa/0.7.15'
 
-    cpus 6
+    cpus 24
 
     input:
     file ref from refChannel
@@ -42,8 +42,8 @@ process mapBWA {
     """
     set -eo pipefail
     bwa index ${ref}
-    bwa mem -x ont2d -a -t ${task.cpus} ${ref} ${fastq}|  samtools view -bS -T ${ref} -m ${params.minReadLength} - |\
-    samtools sort -  > HLAXX`tr -cd '[:alnum:]' < /dev/urandom | fold -w30 | head -n1`.bam
+    bwa mem -x ont2d -a -t ${task.cpus} ${ref} ${fastq}|  samtools view --threads ${task.cpus} -bS -T ${ref} -m ${params.minReadLength} - |\
+    samtools sort --threads ${task.cpus} -  > HLAXX`tr -cd '[:alnum:]' < /dev/urandom | fold -w30 | head -n1`.bam
     """
 }
 
