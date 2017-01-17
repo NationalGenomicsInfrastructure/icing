@@ -8,8 +8,8 @@ if (!params.sample) {
   exit 1, "Please specify the sample FASTQ file containing 2D reads only."
 }
 
-if(!params.reference) {
-  exit 1, "Please specify the genomic references."
+if(!params.refDir) {
+  exit 1, "Please specify a directory, where the genomic references are for the locus."
 }
 
 if(!params.minReadLength) {
@@ -22,23 +22,11 @@ if(!params.minContigLength ) {
 
 fastq = file(params.sample)
 base = fastq.getBaseName()//.replaceFirst(/.fastq/, "")
-locus = file(params.reference).getBaseName().replaceFirst(/.fasta/, "")
-
-resultSuffix = "_"+base.replaceFirst(/.fastq/, "")+"_"+locus
-
-reference = file(params.reference)
-referenceIdx = file(params.reference+".fai")
-referenceAmb = file(params.reference+".amb")
-referenceAnn = file(params.reference+".ann")
-referenceBwt = file(params.reference+".bwt")
-referenceFai = file(params.reference+".fai")
-referencePac = file(params.reference+".pac")
-referenceSa = file(params.reference+".sa")
-outDirName = reference.getBaseName()
+//locus = file(params.reference).getBaseName().replaceFirst(/.fasta/, "")
+resultSuffix = "_"+base.replaceFirst(/.fastq/, "")+"_"+params.locus
+refChannel = Channel.fromPath( params.refDir + '/HLA*.fasta')
 
 process mapBWA {
-    publishDir "rawAlignment"+resultSuffix
-
     module 'bioinfo-tools'
     module 'samtools/1.3'
     module 'bwa/0.7.15'
@@ -46,57 +34,60 @@ process mapBWA {
     cpus 6
 
     input:
-    file reference
-    file referenceIdx
-    file referenceAmb
-    file referenceAnn
-    file referenceBwt
-    file referenceFai
-    file referencePac
-    file referenceSa
+    file ref from refChannel
 
     output:
-    file '*.bam' into HLAbam
-    file '*.bai' into HLAbai
+    file 'HLAXX*.bam' into HLAbam
 
     """
     set -eo pipefail
-    bwa mem -x ont2d -t ${task.cpus} ${reference} ${fastq} -a | \
-    samtools view -bS -T ${reference} - | \
-    samtools sort -  > flags2fix.bam 
-    samtools view -H flags2fix.bam > header
-    samtools view flags2fix.bam | awk 'OFS="\t"{if(\$2==256 || \$2==2048) \$2=0; if(\$2==272 || \$2==2064) \$2=16; print \$0}' > fakeflags.sam
-    cat header fakeflags.sam | samtools view -bS - > ${base}.bam
-    rm -rf flags2fix.bam fakeflags.sam
-    samtools index ${base}.bam
+    bwa index ${ref}
+    bwa mem -x ont2d -a -t ${task.cpus} ${ref} ${fastq}|  samtools view -bS -T ${ref} -m ${params.minReadLength} - |\
+    samtools sort -  > HLAXX`tr -cd '[:alnum:]' < /dev/urandom | fold -w30 | head -n1`.bam
     """
 }
 
-// when using pre-calculated BAM, start by adding --bam FILE.bam
+process mergeBAMs {
+    publishDir "rawAlignment"+resultSuffix, mode: 'copy'
 
-fHLAbam = Channel.create()
-rawHLAbam = Channel.create()
+    module 'samtools/1.3'
+   
+    input:
+    file singleBAM from HLAbam.toList()
 
-//HLAbam = file(params.bam)
-//HLAbam.separate(fHLAbam, rawHLAbam){ a -> [a,a] }
+    output:
+    file "merged.bam" into mergedBAM 
 
-
-// here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
-// generally we are ignoring reads that are containing more mismatches then the 10% of the expected minimal contig size
-editDist = params.minContigLength.toInteger()/10
+    """
+    samtools merge merged.bam HLAXX*bam
+    """
+}
+//
+//// when using pre-calculated BAM, start by adding --bam FILE.bam
+//
+//fHLAbam = Channel.create()
+//rawHLAbam = Channel.create()
+//
+////HLAbam = file(params.bam)
+////HLAbam.separate(fHLAbam, rawHLAbam){ a -> [a,a] }
+//
+//
+//// here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
+//// generally we are ignoring reads that are containing more mismatches then the 10% of the expected minimal contig size
+editDistance = params.minContigLength.toInteger() - params.minContigLength.toInteger()/10
 process filterBestMatchingReads {
     publishDir "bestMatchingReads"+resultSuffix, mode:'copy'
     module 'samtools/1.3'
 
     input:
-    file bam from HLAbam
+    file bam from mergedBAM
 
     output:
     file "filtered_${bam}" into filteredBam
 
     script:
     """
-    samtools view -h -m ${params.minReadLength} -bS ${bam} | bamtools filter -tag "AS:>1000" -in - -out "filtered_"${bam} 
+    samtools view -h -bS ${bam} | bamtools filter -tag "AS:>${editDistance}" -in - -out "filtered_"${bam} 
     """
 }
 
@@ -131,125 +122,125 @@ process selectAllelesWithDecentCoverage {
     samtools merge -@8 mergedDC.bam FHB*bam
     """
 }
-
-process makePileUp {
-    publishDir "pileup"+resultSuffix, mode:'copy'
-    module 'samtools/1.3'
-
-    input: 
-    file fb from dcBam 
-
-    output:
-    file "${base}.pileup" into filteredPileup
-
-    script:
-    """
-    samtools mpileup -B -d 10000 -Q 10 -A ${fb} > ${base}.pileup
-    """
-}
-
-process getConsensuses {
-    publishDir "rawCons"+resultSuffix
-    module 'bcftools/1.3'
-
-    input:
-    file pileup from filteredPileup
-
-    output:
-    file "cons.fasta" into consensusFASTA
-
-    script: 
-    """
-    #bcftools call -c ${pileup} | vcfutils.pl vcf2fq > cons.fastq
-    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d 8 > cons.fasta 
-    """
-} 
-
-//consensusFASTQ = file("results/cons.fastq")
-
-process selectConsensusCandidate {
-    // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
-
-    publishDir "candidates"+resultSuffix
-    input:
-    file cf from consensusFASTA
-
-    output:
-    file "*.candidate.fasta" into candidatesFASTA
-    file "*.candidate.aln" into candidatesALN
-
-    """
-    python ${workflow.projectDir}/selectCandidate.py -c ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
-    mafft --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
-    """
-}
-//candidates = candidates.view{"Candidates "+it}
-// What if there is a single candidate? 
-
-
-
-// All this magic is to calculate only the upper triangle of the distance matrix (since 
-// it is symetrical and the main diagonals are all zeros).
 //
-// make two lists of candidates so we can have a Cartesian product and
-// we will be able to calculate all the distances
-(s1,s2,toSelectFrom) = candidatesFASTA.flatten().into(3)
-// make the cartesian, but leave out entries where the indexes are equal
-doublePairs = s1.spread(s2).filter{it[0] != it[1]}
-// now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
-// and store only unique entries
-singlePairs = doublePairs.map { x -> x.sort() }.unique()
-//singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
-process calculateSimilarity {
-    publishDir "distanceMatrix"+resultSuffix, mode: 'copy'
-
-    input:
-    set file(seq1), file(seq2) from singlePairs 
-
-    output:
-    file "*_*.dist" into distances
-
-    script:
-    """
-    needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
-        -asequence $seq1 \
-        -bsequence $seq2 |\
-     awk '/HLA/{print }'|\
-     tr -d "()" > $seq1"_"$seq2".dist"
-    """
-}
-
-allDistances = distances.collectFile(){it -> "${it} "}
-
-process selectMostDistantSequences {
-    publishDir "mostDistant"+resultSuffix
-
-    input:
-    set file(dist) from allDistances
-
-    output:
-    file "sorted.candidates.txt" into sortedCandidateDistances
-    file "most.distant.candidates.txt" into mostDistantCandidates 
-
-    script:
-    """
-    for f in `cat $dist`; do
-        cat \$f 
-    done |\
-    sort -k4n > sorted.candidates.txt
-    tail -1 sorted.candidates.txt |awk '{printf("%s\\n%s",\$1,\$2)}' > most.distant.candidates.txt
-    """
-}
-// now in the very last line of the "sorted.candidates.txt" file we have 
-// the name of the two most distant candidates. Providing the consensuses are
-// commensurable (they have similar length and quality) we are extracting reads that are
-// - able to align to one of these most distant candidates (this should be OK 
-//   by filtering reads only to aligned to the candidate reference - bwa reports only 3 alignments by default, so have to be careful)
-// - are at least $minReadLength long (samtools view -m length(ref)/2)
-// - alignment score is higher than 1000 (AS tag in bwa alignment) 
-
-mostDistantCandidates = mostDistantCandidates.view{"mostDistantCandidates $it"}
-
+//process makePileUp {
+//    publishDir "pileup"+resultSuffix, mode:'copy'
+//    module 'samtools/1.3'
+//
+//    input: 
+//    file fb from dcBam 
+//
+//    output:
+//    file "${base}.pileup" into filteredPileup
+//
+//    script:
+//    """
+//    samtools mpileup -B -d 10000 -Q 10 -A ${fb} > ${base}.pileup
+//    """
+//}
+//
+//process getConsensuses {
+//    publishDir "rawCons"+resultSuffix
+//    module 'bcftools/1.3'
+//
+//    input:
+//    file pileup from filteredPileup
+//
+//    output:
+//    file "cons.fasta" into consensusFASTA
+//
+//    script: 
+//    """
+//    #bcftools call -c ${pileup} | vcfutils.pl vcf2fq > cons.fastq
+//    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d 8 > cons.fasta 
+//    """
+//} 
+//
+////consensusFASTQ = file("results/cons.fastq")
+//
+//process selectConsensusCandidate {
+//    // export LD_LIBRARY_PATH=${HOME}/miniconda2/pkgs/libpng-1.6.22-0/lib/
+//
+//    publishDir "candidates"+resultSuffix
+//    input:
+//    file cf from consensusFASTA
+//
+//    output:
+//    file "*.candidate.fasta" into candidatesFASTA
+//    file "*.candidate.aln" into candidatesALN
+//
+//    """
+//    python ${workflow.projectDir}/selectCandidate.py -c ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
+//    mafft --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
+//    """
+//}
+////candidates = candidates.view{"Candidates "+it}
+//// What if there is a single candidate? 
+//
+//
+//
+//// All this magic is to calculate only the upper triangle of the distance matrix (since 
+//// it is symetrical and the main diagonals are all zeros).
+////
+//// make two lists of candidates so we can have a Cartesian product and
+//// we will be able to calculate all the distances
+//(s1,s2,toSelectFrom) = candidatesFASTA.flatten().into(3)
+//// make the cartesian, but leave out entries where the indexes are equal
+//doublePairs = s1.spread(s2).filter{it[0] != it[1]}
+//// now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
+//// and store only unique entries
+//singlePairs = doublePairs.map { x -> x.sort() }.unique()
+////singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
+//process calculateSimilarity {
+//    publishDir "distanceMatrix"+resultSuffix, mode: 'copy'
+//
+//    input:
+//    set file(seq1), file(seq2) from singlePairs 
+//
+//    output:
+//    file "*_*.dist" into distances
+//
+//    script:
+//    """
+//    needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
+//        -asequence $seq1 \
+//        -bsequence $seq2 |\
+//     awk '/HLA/{print }'|\
+//     tr -d "()" > $seq1"_"$seq2".dist"
+//    """
+//}
+//
+//allDistances = distances.collectFile(){it -> "${it} "}
+//
+//process selectMostDistantSequences {
+//    publishDir "mostDistant"+resultSuffix
+//
+//    input:
+//    set file(dist) from allDistances
+//
+//    output:
+//    file "sorted.candidates.txt" into sortedCandidateDistances
+//    file "most.distant.candidates.txt" into mostDistantCandidates 
+//
+//    script:
+//    """
+//    for f in `cat $dist`; do
+//        cat \$f 
+//    done |\
+//    sort -k4n > sorted.candidates.txt
+//    tail -1 sorted.candidates.txt |awk '{printf("%s\\n%s",\$1,\$2)}' > most.distant.candidates.txt
+//    """
+//}
+//// now in the very last line of the "sorted.candidates.txt" file we have 
+//// the name of the two most distant candidates. Providing the consensuses are
+//// commensurable (they have similar length and quality) we are extracting reads that are
+//// - able to align to one of these most distant candidates (this should be OK 
+////   by filtering reads only to aligned to the candidate reference - bwa reports only 3 alignments by default, so have to be careful)
+//// - are at least $minReadLength long (samtools view -m length(ref)/2)
+//// - alignment score is higher than 1000 (AS tag in bwa alignment) 
+//
+//mostDistantCandidates = mostDistantCandidates.view{"mostDistantCandidates $it"}
+//
 //process extractReadsForBestCandidates {
 //    publishDir "candidateReads"+resultSuffix, mode: 'copy'
 //    module 'samtools/1.3'
