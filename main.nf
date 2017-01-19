@@ -22,7 +22,6 @@ if(!params.minContigLength ) {
 
 fastq = file(params.sample)
 base = fastq.getBaseName()//.replaceFirst(/.fastq/, "")
-//locus = file(params.reference).getBaseName().replaceFirst(/.fasta/, "")
 resultSuffix = "_"+base.replaceFirst(/.fastq/, "")+"_"+params.locus
 refChannel = Channel.fromPath( params.refDir + '/HLA*.fasta')
 
@@ -152,11 +151,11 @@ process getConsensuses {
 
     script: 
     """
-    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d 8 > cons.fasta 
+    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d ${params.minCoverage} > cons.fasta 
     """
 } 
 
-process selectConsensusCandidate {
+process selectConsensusCandidates {
     publishDir "ICING_candidates"+resultSuffix
 
     cpus 6
@@ -166,98 +165,67 @@ process selectConsensusCandidate {
 
     output:
     file "*.candidate.fasta" into candidatesFASTA
-    file "*.candidate.aln" into candidatesALN
 
     """
     python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
-    mafft --thread ${task.cpus} --clustalout --adjustdirection ${base}.candidate.fasta > ${base}.candidate.aln
     """
 }
-//candidates = candidates.view{"Candidates "+it}
-// What if there is a single candidate? 
 
-
-
-// All this magic is to calculate only the upper triangle of the distance matrix (since 
-// it is symetrical and the main diagonals are all zeros).
-//
-// make two lists of candidates so we can have a Cartesian product and
-// we will be able to calculate all the distances
-(s1,s2,toSelectFrom) = candidatesFASTA.flatten().into(3)
-// make the cartesian, but leave out entries where the indexes are equal
-doublePairs = s1.spread(s2).filter{it[0] != it[1]}
-// now sort by filenames (so ["a", "b"] and ["b","a"] both will be ["a", "b"] )
-// and store only unique entries
-singlePairs = doublePairs.map { x -> x.sort() }.unique()
-singlePairs = singlePairs.view{"Single pairs to compare: "+ it}
-process calculateSimilarity {
-    publishDir "ICING_distanceMatrix"+resultSuffix, mode: 'copy'
-
+// Now we have a list of candidates, try to find the most similar ones.
+// Note, we are using the CDS only FASTAs, as we want to get the genotypes,
+// but this also means that the process provides only 3 fields precision for the candidate list.
+// To get 4 fields precision you have to go through the candidate list in an alignment browser like IGV one-by-one
+// We are assuming the cdsHLA*.fasta files were generated from the ftp://ftp.ebi.ac.uk/pub/databases/ipd/imgt/hla/fasta/*_nuc.fasta
+// files, containing CDSs
+// ditto, we are assigning IDs and filename to consensuses as "cons"
+cdsChannel = Channel.fromPath(params.refDir + '/cdsHLA*.fasta')
+process makeSeparateConsensuses {
     input:
-    set file(seq1), file(seq2) from singlePairs 
+    file conss from candidatesFASTA
 
     output:
-    file "*_*.dist" into distances
+    file "cons*.fasta" into singleConsensuses
+
+    """
+    python ${workflow.projectDir}/separateFASTA.py -f ${conss} -p cons
+    """
+}
+// make a Cartesian product of reference and consensus sequences
+singleConsensuses = singleConsensuses.flatten()
+refQueryPairs = cdsChannel.spread(singleConsensuses)
+// calculate the delta files with mummer/nucmer
+process calcDeltas {
+    tag {params.locus + " " + ref + " " + query }
+    module 'mummer/3.23'
+
+    input:
+    set file(ref),file(query) from refQueryPairs
+
+    output:
+    file '*.delta' into deltas
+
+    """
+    rn=`basename ${ref}`
+    qn=`basename ${query}`
+    PREFIX=\${rn%.fasta}_\${qn%.fasta}
+    nucmer --prefix=\${PREFIX} ${ref} ${query}
+    """
+}
+
+// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
+// and sort deltas according to mismatches
+
+deltas = deltas.flatten().toList()//.view{"D " + it}
+process sortByMismatches {
+    publishDir "ICING_final_candidate_list"+resultSuffix, mode: 'copy'
+    input:
+    file fl from deltas
+
+    output:
+    file "sorted.deltas" into sortedDeltas
 
     script:
     """
-    needle -aformat score -datafile EDNAFULL -outfile stdout -gapopen 10.0 -gapextend 0.5 \
-        -asequence $seq1 \
-        -bsequence $seq2 |\
-     awk '/HLA/{print }'|\
-     tr -d "()" > $seq1"_"$seq2".dist"
+    for f in ${fl}; do awk 'BEGIN{sum=0}{if(NF==7)sum+=\$5}END{print sum,FILENAME}' \$f; done| sort -n > sorted.deltas 
     """
 }
-//
-//allDistances = distances.collectFile(){it -> "${it} "}
-//
-//process selectMostDistantSequences {
-//    publishDir "mostDistant"+resultSuffix
-//
-//    input:
-//    set file(dist) from allDistances
-//
-//    output:
-//    file "sorted.candidates.txt" into sortedCandidateDistances
-//    file "most.distant.candidates.txt" into mostDistantCandidates 
-//
-//    script:
-//    """
-//    for f in `cat $dist`; do
-//        cat \$f 
-//    done |\
-//    sort -k4n > sorted.candidates.txt
-//    tail -1 sorted.candidates.txt |awk '{printf("%s\\n%s",\$1,\$2)}' > most.distant.candidates.txt
-//    """
-//}
-//// now in the very last line of the "sorted.candidates.txt" file we have 
-//// the name of the two most distant candidates. Providing the consensuses are
-//// commensurable (they have similar length and quality) we are extracting reads that are
-//// - able to align to one of these most distant candidates (this should be OK 
-////   by filtering reads only to aligned to the candidate reference - bwa reports only 3 alignments by default, so have to be careful)
-//// - are at least $minReadLength long (samtools view -m length(ref)/2)
-//// - alignment score is higher than 1000 (AS tag in bwa alignment) 
-//
-//mostDistantCandidates = mostDistantCandidates.view{"mostDistantCandidates $it"}
-//
-//process extractReadsForBestCandidates {
-//    publishDir "candidateReads"+resultSuffix, mode: 'copy'
-//    module 'samtools/1.3'
-//
-//    input:
-//    set file(alignment) from rawHLAbam
-//    set file(cIds) from mostDistantCandidates
-//
-//    output:
-//    file "*bam" into candidateReads
-//    file "*bai" into candidateReadIndexes
-//
-//    script:
-//    """
-//    samtools index $alignment
-//    for id in `cat $cIds`; do
-//        samtools view -h $alignment "HLA:\${id}:" | samtools view -h -m ${params.minReadLength} -bS - | bamtools filter -tag "AS:>1000" -in - -out \${id}.bam
-//        samtools index \${id}.bam
-//    done
-//    """
-//}
