@@ -39,3 +39,21 @@ process calcDeltas {
     nucmer --prefix=\${PREFIX} ${ref} ${query}
     """
 }
+
+// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
+// and sort deltas according to mismatches
+
+deltas = deltas.flatten().toList()//.view{"D " + it}
+process sortByMismatches {
+    input:
+    file fl from deltas
+
+    output:
+    file "sorted.deltas" into sortedDeltas
+
+    script:
+    """
+    for f in ${fl}; do awk 'BEGIN{sum=0}{if(NF==7)sum+=\$5}END{print sum,FILENAME}' \$f; done| sort -n > sorted.deltas 
+    """
+
+}
