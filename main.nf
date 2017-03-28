@@ -20,6 +20,7 @@ dcBam = Channel.create()
 filteredPileup = Channel.create()
 genChannel = Channel.create()
 cdsChannel = Channel.create()
+stepCount = 0
 
 workflowSteps = params.steps.split(',').collect {it.trim()}
 if ('align' in workflowSteps) {
@@ -69,7 +70,7 @@ process mapBWA {
 }
 
 process mergeBAMs {
-    publishDir "ICING_rawAlignment"+resultSuffix, mode: 'copy'
+    publishDir "ICING_" + incrementSteps() + "_rawAlignment"+resultSuffix, mode: 'copy'
 
     module 'samtools/1.3'
    
@@ -82,14 +83,14 @@ process mergeBAMs {
     when: 'align' in workflowSteps
     script:
     """
-    samtools merge merged.bam HLAXX*bam
+    samtools merge --threads ${task.cpus} merged.bam HLAXX*bam
     """
 }
 // here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
 // generally we are ignoring reads that are containing more mismatches then the 5% of the expected minimal contig size
 editDistance = params.minContigLength.toInteger()*0.05
 process filterBestMatchingReads {
-    publishDir "ICING_bestMatchingReads"+resultSuffix, mode:'copy'
+    publishDir "ICING_" + incrementSteps() + "_bestMatchingReads"+resultSuffix, mode:'copy'
     module 'samtools/1.3'
     module 'bamtools/2.4.1'
 
@@ -102,14 +103,14 @@ process filterBestMatchingReads {
     when: 'align' in workflowSteps
     script:
     """
-    samtools view -h -bS ${bam} | bamtools filter -tag "NM:>${editDistance}" -in - -out "filtered_"${bam} 
+    samtools view -h -bS ${bam} | bamtools filter -tag "NM:<${editDistance}" -in - -out "filtered_"${bam} 
     """
 }
 
 // Here we are running some stats on the bam files and trying to get only alleles
 // with nice coverage. The rest of the crap is thrown away
 process selectAllelesWithDecentCoverage {
-    publishDir "ICING_goodCoverage"+resultSuffix
+    publishDir "ICING_" + incrementSteps() + "_goodCoverage"+resultSuffix
     module 'samtools/1.3'
 
     input:
@@ -147,9 +148,8 @@ if('pileup' in workflowSteps) {
 } else {
     dcBam.close()
 }
-
 process makePileUp {
-    publishDir "ICING_pileup"+resultSuffix, mode:'copy'
+    publishDir "ICING_" + incrementSteps() + "_pileup"+resultSuffix, mode:'copy'
     module 'samtools/1.3'
 
     input: 
@@ -173,10 +173,9 @@ if('genotype' in workflowSteps) {
 } else {
     filteredPileup.close()
 }
-
 filteredPileup = filteredPileup.view{"Pileup from filtered reads: " + it}
 process getConsensuses {
-    publishDir "ICING_rawCons"+resultSuffix
+    publishDir "ICING_" + incrementSteps() + "_rawCons"+resultSuffix
 
     input:
     file pileup from filteredPileup
@@ -192,7 +191,7 @@ process getConsensuses {
 } 
 
 process selectConsensusCandidates {
-    publishDir "ICING_candidates"+resultSuffix
+    publishDir "ICING_" + incrementSteps() + "_candidates"+resultSuffix
 
     input:
     file cf from consensusFASTA
@@ -229,34 +228,68 @@ process makeSeparateConsensuses {
     python ${workflow.projectDir}/separateFASTA.py -f ${conss} -p cons
     """
 }
-singleConsensuses = singleConsensuses.view{"Consenuses to align: $it"}
-// make a Cartesian product of reference and consensus sequences
-//singleConsensuses = singleConsensuses.flatten()
-//refQueryPairs = cdsChannel.spread(singleConsensuses)
-//refQueryPairs = refQueryPairs.view{"Reference and Query pair $it" } 
-//// calculate the delta files with mummer/nucmer
-//process calcDeltas {
-//    tag {params.locus + " " + ref + " " + query }
-//    module 'mummer/3.23'
-//
-//    input:
-//    set file(ref),file(query) from refQueryPairs
-//
-//    output:
-//    file '*.delta' into deltas
-//
-//    when: 'genotype' in workflowSteps
-//    script:
-//    """
-//    rn=`basename ${ref}`
-//    qn=`basename ${query}`
-//    PREFIX=\${rn%.fasta}_\${qn%.fasta}
-//    nucmer --prefix=\${PREFIX} ${ref} ${query}
-//    """
-//}
-//
-//// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
-//// and sort deltas according to mismatches
+singleConsensuses = singleConsensuses.view{"Consenuses to use: $it"}
+
+// make a Cartesian of all consensuses
+// first duplicate the channel 
+(consCh1,consCh2) = singleConsensuses.into(2)
+consCh1 = consCh1.flatten()
+consCh2 = consCh2.flatten()
+// and make an NxN pairs matrix
+consPairs = consCh1.spread(consCh2)
+
+// calculate distances between consensuses
+process calcDeltas {
+    tag {params.locus + " " + ref + " " + query }
+    module 'mummer/3.23'
+
+    input:
+    set file(ref),file(query) from consPairs 
+
+    output:
+    file '*.delta' into deltas
+
+    when: 'genotype' in workflowSteps
+    script:
+    """
+    rn=`basename ${ref}`
+    qn=`basename ${query}`
+    PREFIX=\${rn%.fasta}_\${qn%.fasta}
+    nucmer --prefix=\${PREFIX} ${ref} ${query}
+    """
+}
+// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
+// and sort deltas according to mismatches
+
+deltas = deltas.flatten().toList()//.view{"D " + it}
+process sortByMismatches {
+    publishDir "ICING_" + incrementSteps() + "_final_candidate_list"+resultSuffix, mode: 'copy'
+    input:
+    file fl from deltas
+
+    output:
+    file "sorted.deltas" into sortedDeltas
+
+    when: 'genotype' in workflowSteps
+    script:
+    """
+    for f in ${fl}; do awk 'BEGIN{sum=0}{if(NF==7)sum+=\$5}END{print sum,FILENAME}' \$f; done| sort -n > sorted.deltas 
+    """
+}
+
+// keep the most distant sequences only
+// align reads back again to these two most distant sequences
+// create a new pileup and consensus from these
+// make an MSA for important exons and select those that are best fits
+// make an MSA for all exons from best fits - report only
+// make genomic MSA for best fits - report only
+
+
+
+
+
+// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
+// and sort deltas according to mismatches
 //
 //deltas = deltas.flatten().toList()//.view{"D " + it}
 //process sortByMismatches {
@@ -273,3 +306,8 @@ singleConsensuses = singleConsensuses.view{"Consenuses to align: $it"}
 //    for f in ${fl}; do awk 'BEGIN{sum=0}{if(NF==7)sum+=\$5}END{print sum,FILENAME}' \$f; done| sort -n > sorted.deltas 
 //    """
 //}
+
+def incrementSteps() {
+	return ++stepCount
+
+}
