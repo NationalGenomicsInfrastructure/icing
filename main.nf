@@ -119,6 +119,7 @@ process selectAllelesWithDecentCoverage {
     output:
     file "candidate.stats" into stats
     file "mergedDC.bam" into dcBam
+    file "mergedDC.bam.bai"
     
     when: 'align' in workflowSteps
     script:
@@ -137,6 +138,7 @@ process selectAllelesWithDecentCoverage {
         samtools view -hb ${fbam} \${allele}: > FHB\${allele}.bam
     done
     samtools merge mergedDC.bam FHB*bam
+	samtools index mergedDC.bam
     """
 }
 // END OF ALIGNMENT
