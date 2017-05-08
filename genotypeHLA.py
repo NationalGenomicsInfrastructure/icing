@@ -61,12 +61,19 @@ def getCompartmenstForAlleles(fixedIMGT,locus):
 	for seq_record in SeqIO.parse(fixedIMGT,"imgt"):
 		# if it is the correct locus and there is a sequence record (not a deleted one)
 		if seq_record.description.startswith(locus) and len(seq_record.seq) > 1:
-			primary[seq_record.id] = getPrimaryExons(seq_record,locus)
+			primary[seq_record.id] = getPrimaryExons(seq_record, locus)
+			secondary[seq_record.id] = getSecondaryExons(seq_record, locus)
+			intronsAndUTRs[seq_record.id] = getIntronsAndUTRs(seq_record, locus)
 		
 	print "ready"	
-	return (primary,"rubbish","rubbish")
+	return (primary,secondary,intronsAndUTRs)
 
 def getPrimaryExons(sr,locus):
+	"""
+	Primary exons are exon 2 and 3 for HLA-A,B,C and exon 2 for all the rest.
+	TODO: Note, this is actually wrong. There are quite a few other loci where the important polymorphic
+	exons is not exon 2 only, but in the moment we are ignoring this fact.
+	"""
 	exonList = []
 	for f in sr.features:
 		if f.type == "exon":
@@ -75,6 +82,33 @@ def getPrimaryExons(sr,locus):
 			if locus in ["HLA-A","HLA-B", "HLA-C"]  and f.qualifiers['number'] == ['3']:
 				exonList.append( sr.seq[f.location.start:f.location.end] )
 	return exonList
+
+def getSecondaryExons(sr,locus):
+	"""
+	We are adding all the other exons as secondary.
+	"""
+	exonList = []
+	for f in sr.features:
+		if f.type == "exon":	# consider only exons
+			# treat Class-I and Class-II separately: it can be faster, but it is more readable this way
+			# Class-I first
+			if locus in ["HLA-A","HLA-B", "HLA-C"] and f.qualifiers['number'] not in ['2','3']:
+				exonList.append( sr.seq[f.location.start:f.location.end] )
+			# Class-II and other (all non-Class-I entries)
+			elif locus not in ["HLA-A","HLA-B", "HLA-C"] and f.qualifiers['number'] != ['2']:
+				exonList.append( sr.seq[f.location.start:f.location.end] )
+		
+	return exonList
+
+def getIntronsAndUTRs(sr,locus):
+	"""
+	All non-exonic compartments are added
+	"""
+	nonExonsList = []
+	for f in sr.features:
+		if f.type != "exon":
+			nonExonsList.append( sr.seq[f.location.start:f.location.end] )	
+	return nonExonsList
 
 def preSelectTypes(primary,consensus):
 	return ["HLA00005","HLA000101"]
