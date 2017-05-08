@@ -5,7 +5,8 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC
 import click
 import sys
-
+import swalign
+import multiprocessing
 
 def validate_locus(ctx,param,value):
     try:
@@ -110,7 +111,33 @@ def getIntronsAndUTRs(sr,locus):
 			nonExonsList.append( sr.seq[f.location.start:f.location.end] )	
 	return nonExonsList
 
+
+def swAligner((sw,consensus,exon2,refName,allele)):
+	print "aligning "+allele
+	return sw.align(consensus,exon2,ref_name=refName,query_name=allele)
+
 def preSelectTypes(primary,consensus):
+	"""
+	For each primary exon (or exon pair)
+		make an alignment for exon 2, and put the result into a dictionary as alignmentEx2['allele'] = #mismatches
+		if there is exon 3 also, 
+			do an alignmentEx3['allele'] = #mismatches
+			merge the two in a way that sort both, keep the best for both, and make an intersect
+		else
+			sort, and keep the best alignments only
+		
+	"""
+	# sw = swalign.LocalAlignment( swalign.NucleotideScoringMatrix(match, mismatch), gap_penalty, gap_extension_penalty,gap_extension_decay=gap_extension_decay, verbose=verbose, globalalign=globalalign, full_query=full_query)
+	sw = swalign.LocalAlignment( swalign.NucleotideScoringMatrix  (2,     -1),       -1,          -1,                   gap_extension_decay = 0.0,               verbose=False,   globalalign=False,       full_query=False)
+	pool_input = ()
+	for allele,exons in primary.items():
+		pool_input += ([sw, consensus.seq, str(exons[0]), consensus.id, allele],) 
+
+	mp_pool = multiprocessing.Pool(8)
+	alignments = mp_pool.map(swAligner, pool_input )
+	for alg in alignments:
+		print alg.dump()
+
 	return ["HLA00005","HLA000101"]
 
 def selectGenotypesConsideringAllExons(seconday,consensus):
