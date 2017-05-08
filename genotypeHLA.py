@@ -43,7 +43,38 @@ def doGenotype(cons, dat, locus):
 
 
 def getCompartmenstForAlleles(fixedIMGT,locus):
-	return ("A","B","C")
+	"""
+	Go through each entry in the IMGT/HLA EMBL file, and store out exons in a dictionary.
+	For Class-I we are storing exons 2 & 3, for Class-II only exon 2. 
+	The data is is like
+
+	primary{}
+	ex2='ACTGATCGATCGATACG'
+	ex3='CCAGGCCTGGATCGCATTAGC'
+	primary['HLA000101']=[ex2,ex3]
+	{'HLA000101': ['ACTGATCGATCGATACG', 'CCAGGCCTGGATCGCATTAGC']}
+	"""
+	print "Processing reference IMGT file"
+	primary = {}
+	secondary = {}
+	intronsAndUTRs = {}
+	for seq_record in SeqIO.parse(fixedIMGT,"imgt"):
+		# if it is the correct locus and there is a sequence record (not a deleted one)
+		if seq_record.description.startswith(locus) and len(seq_record.seq) > 1:
+			primary[seq_record.id] = getPrimaryExons(seq_record,locus)
+		
+	print "ready"	
+	return (primary,"rubbish","rubbish")
+
+def getPrimaryExons(sr,locus):
+	exonList = []
+	for f in sr.features:
+		if f.type == "exon":
+			if f.qualifiers['number'] == ['2'] :
+				exonList.append( sr.seq[f.location.start:f.location.end] )
+			if locus in ["HLA-A","HLA-B", "HLA-C"]  and f.qualifiers['number'] == ['3']:
+				exonList.append( sr.seq[f.location.start:f.location.end] )
+	return exonList
 
 def preSelectTypes(primary,consensus):
 	return ["HLA00005","HLA000101"]
@@ -85,4 +116,4 @@ def fixIMGTfile(hladat):
 
 
 if __name__ == "__main__":
-    doGenotype()
+	doGenotype()
