@@ -4,7 +4,7 @@ workflow.onError { // Display error message
     log.info "Usage (default values in [], aiming for Class-I typing ):"
     log.info "nextflow run main.nf --steps align --genDir dir --locus locus --sample file.fastq --minReadLength [2000] --minContigLength [3000]"
     log.info "or"
-    log.info "nextflow run main.nf --steps genotype --cdsDir dir --bam file.bam --minCoverage [70] --minContigLength [3000] --locus locus"
+    log.info "nextflow run main.nf --steps genotype --cdsDir dir --bam file.bam --minCoverage [70] --minContigLength [3000] --locus locus --sampleSuffix mySample"
     log.info "steps can be merged like"
     log.info "nextflow run main.nf --steps align,genotype --genDir dir --cdsDir dir --locus locus --sample file.fastq --minReadLength [2000] --minCoverage [70] --minContigLength [3000]"
     log.info "Optionally number of working threads can be assigned as --threads [8]"
@@ -31,7 +31,7 @@ if ('align' in workflowSteps) {
 } else if ('genotype' in workflowSteps ) {
     if(!params.cdsDir) { exit 1, "Please specify a directory, where the CDS references are for the locus." }
     base = file(params.bam).getBaseName()
-    resultSuffix = "_"+base.replaceFirst(/.pileup/, "")+"_"+params.locus
+    resultSuffix = "_"+params.sampleSuffix +"_"+params.locus
     cdsChannel = Channel.fromPath( params.cdsDir + '/cdsHLA*.fasta')
 } else {
     exit 1, 'Please provide \'align\', or \'genotype\' as one of the workflow steps (--steps align,genotype)'
@@ -61,6 +61,8 @@ process mapBWA {
     samtools sort --threads ${task.cpus} -  > HLAXX`tr -cd '[:alnum:]' < /dev/urandom | fold -w30 | head -n1`.bam
     """
 }
+// we are not using genChannel anymore: close it or it will hang and wait at genotyping
+genChannel.close()
 
 process mergeBAMs {
     publishDir "ICING_" + incrementSteps() + "_rawAlignment"+resultSuffix, mode: 'copy'
@@ -77,6 +79,7 @@ process mergeBAMs {
     script:
     """
     samtools merge --threads ${task.cpus} merged.bam HLAXX*bam
+	samtools index merged.bam
     """
 }
 // here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
@@ -93,11 +96,13 @@ process filterBestMatchingReads {
 
     output:
     file "filtered_${bam}" into filteredBam
+    file "filtered_${bam}.bai" into filteredBai
 
     when: 'align' in workflowSteps
     script:
     """
     samtools view -h -bS ${bam} | bamtools filter -tag "NM:<${editDistance}" -in - -out "filtered_"${bam} 
+	samtools index "filtered_"${bam}
     """
 }
 
@@ -144,6 +149,7 @@ if('genotype' in workflowSteps) {
 } else {
     dcBam.close()
 }
+
 process makePileUp {
     publishDir "ICING_" + incrementSteps() + "_pileup"+resultSuffix, mode:'copy'
     module 'samtools/1.3'
@@ -161,7 +167,7 @@ process makePileUp {
     """
 }
 
-////////////////////////////////////    expecting a pileup      ////////////////////////////////////////
+//////////////////////////////////////    expecting a pileup      ////////////////////////////////////////
 if('genotype' in workflowSteps) {
     if(params.pileup) {
         filteredPileup = Channel.fromPath(params.pileup)
@@ -224,57 +230,22 @@ process makeSeparateConsensuses {
     python ${workflow.projectDir}/separateFASTA.py -f ${conss} -p cons
     """
 }
-singleConsensuses = singleConsensuses.view{"Consenuses to use: $it"}
+singleConsensuses = singleConsensuses.view{"Consensuses to use: $it"}
 
-// make a Cartesian of all consensuses
-// first duplicate the channel 
-(consCh1,consCh2) = singleConsensuses.into(2)
-consCh1 = consCh1.flatten()
-consCh2 = consCh2.flatten()
-// and make an NxN pairs matrix
-consPairs = consCh1.spread(consCh2)
-
-// calculate distances between consensuses
-process calcDeltas {
+process doGenotyping {
     tag {params.locus + " " + ref + " " + query }
-    module 'mummer/3.23'
 
     input:
     set file(ref),file(query) from consPairs 
 
     output:
-    file '*.delta' into deltas
 
     when: 'genotype' in workflowSteps
     script:
     """
-    rn=`basename ${ref}`
-    qn=`basename ${query}`
-    PREFIX=\${rn%.fasta}_\${qn%.fasta}
-    nucmer --prefix=\${PREFIX} ${ref} ${query}
-    """
-}
-// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
-// and sort deltas according to mismatches
-
-deltas = deltas.flatten().toList()//.view{"D " + it}
-process sortByMismatches {
-    publishDir "ICING_" + incrementSteps() + "_final_candidate_list"+resultSuffix, mode: 'copy'
-    input:
-    file fl from deltas
-
-    output:
-    file "sorted.deltas" into sortedDeltas
-
-    when: 'genotype' in workflowSteps
-    script:
-    """
-    for f in ${fl}; do awk 'BEGIN{sum=0}{if(NF==7)sum+=\$5}END{print sum,FILENAME}' \$f; done| sort -n > sorted.deltas 
     """
 }
 
-sortedDeltas.subscribe{println it}
-sortedDeltas.close()
 
 // keep the most distant sequences only
 // align reads back again to these two most distant sequences
@@ -283,28 +254,6 @@ sortedDeltas.close()
 // make an MSA for all exons from best fits - report only
 // make genomic MSA for best fits - report only
 
-
-
-
-
-// now calculate the mismatches (see http://mummer.sourceforge.net/manual/#nucmer for the delta file format)
-// and sort deltas according to mismatches
-//
-//deltas = deltas.flatten().toList()//.view{"D " + it}
-//process sortByMismatches {
-//    publishDir "ICING_final_candidate_list"+resultSuffix, mode: 'copy'
-//    input:
-//    file fl from deltas
-//
-//    output:
-//    file "sorted.deltas" into sortedDeltas
-//
-//    when: 'genotype' in workflowSteps
-//    script:
-//    """
-//    for f in ${fl}; do awk 'BEGIN{sum=0}{if(NF==7)sum+=\$5}END{print sum,FILENAME}' \$f; done| sort -n > sorted.deltas 
-//    """
-//}
 
 def incrementSteps() {
 	return ++stepCount
