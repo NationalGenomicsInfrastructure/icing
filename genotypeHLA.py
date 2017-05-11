@@ -5,7 +5,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC
 import click
 import sys
-import swalign
+import ssw
 import multiprocessing
 
 def validate_locus(ctx,param,value):
@@ -112,9 +112,9 @@ def getIntronsAndUTRs(sr,locus):
 	return nonExonsList
 
 
-def swAligner((sw,consensus,exon2,refName,allele)):
+def swAligner((sw,consensus,exon2)):
 	print "aligning "+allele
-	return sw.align(consensus,exon2,ref_name=refName,query_name=allele)
+	return sw.align(reference=consensus,query=exon2)
 
 def preSelectTypes(primary,consensus):
 	"""
@@ -127,16 +127,22 @@ def preSelectTypes(primary,consensus):
 			sort, and keep the best alignments only
 		
 	"""
-	# sw = swalign.LocalAlignment( swalign.NucleotideScoringMatrix(match, mismatch), gap_penalty, gap_extension_penalty,gap_extension_decay=gap_extension_decay, verbose=verbose, globalalign=globalalign, full_query=full_query)
-	sw = swalign.LocalAlignment( swalign.NucleotideScoringMatrix  (2,     -1),       -1,          -1,                   gap_extension_decay = 0.0,               verbose=False,   globalalign=False,       full_query=False)
+	# we are going to use https://github.com/mengyao/Complete-Striped-Smith-Waterman-Library for SW and SAM output
+	
+	sw = ssw.Aligner()
 	pool_input = ()
 	for allele,exons in primary.items():
-		pool_input += ([sw, consensus.seq, str(exons[0]), consensus.id, allele],) 
+		alignment = sw.align(str(consensus.seq),exons[0])
+		print alignment.alignment_report()
 
-	mp_pool = multiprocessing.Pool(8)
-	alignments = mp_pool.map(swAligner, pool_input )
-	for alg in alignments:
-		print alg.dump()
+#		sw.align(consensus.seq,exons[0])
+#		pool_input += ([sw, consensus.seq, str(exons[0])],) 
+
+
+#	mp_pool = multiprocessing.Pool(8)
+#	alignments = mp_pool.map(swAligner, pool_input )
+#	for alg in alignments:
+#		print alg.dump()
 
 	return ["HLA00005","HLA000101"]
 
