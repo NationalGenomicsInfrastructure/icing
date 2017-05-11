@@ -246,16 +246,13 @@ process doGenotyping {
     """
 }
 
-
-// keep the most distant sequences only
-// align reads back again to these two most distant sequences
-// create a new pileup and consensus from these
-// make an MSA for important exons and select those that are best fits
-// make an MSA for all exons from best fits - report only
-// make genomic MSA for best fits - report only
-
-
 def incrementSteps() {
 	return ++stepCount
 
 }
+
+// making a sam with SW from exons 2&3
+// szilva@galatea ~/sr/minion/hlapool161222/prep/redA/ICING_6_candidates_bc1_HLA-A $ /home/szilva/dev/Complete-Striped-Smith-Waterman-Library/src/pyssw.py -f 1000 -rcs -l /home/szilva/dev/Complete-Striped-Smith-Waterman-Library/src/  -e 0 candidates.fasta ../exons.fasta | tee CSSWL.sam
+// awk '$3 ~/consHLA00005/{print }' CSSWL.sam > consHLA00005.sam
+// 
+ 

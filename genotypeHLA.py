@@ -6,6 +6,7 @@ from Bio.Alphabet import IUPAC
 import click
 import sys
 import ssw
+import operator
 import multiprocessing
 
 def validate_locus(ctx,param,value):
@@ -112,14 +113,28 @@ def getIntronsAndUTRs(sr,locus):
 	return nonExonsList
 
 
-def swAligner((sw,consensus,exon2)):
-	print "aligning "+allele
-	return sw.align(reference=consensus,query=exon2)
+def getBestScoringAlleles( sortedTupleList ):
+	"""
+	We are expecting a sorted list of tuples, containing allele names and alignment scores like
+	[('HLA10395.1', 545), ('HLA06895.1', 545), ('HLA14515.1', 540), ('HLA12165.1', 532), ('HLA03670.1', 532)]
+	We are returning with a list of best matches:
+	['HLA10395.1','HLA06895.1']
+	"""	
+	bestAlleles = []
+	(firstAllele,bestScore) = sortedTupleList[0]
+	for (allele,score) in sortedTupleList[1:]:
+		if bestScore > score:
+			break
+		else:
+			bestAlleles.append(allele)
+	return bestAlleles	 
+
 
 def preSelectTypes(primary,consensus):
 	"""
 	For each primary exon (or exon pair)
-		make an alignment for exon 2, and put the result into a dictionary as alignmentEx2['allele'] = #mismatches
+		make an alignment for exon 2, and put the result into a dictionary as alignmentEx2['allele'] = #score 
+		# we are getting [score, matches, mismatches, inserts, deletions] if we want to 
 		if there is exon 3 also, 
 			do an alignmentEx3['allele'] = #mismatches
 			merge the two in a way that sort both, keep the best for both, and make an intersect
@@ -128,23 +143,21 @@ def preSelectTypes(primary,consensus):
 		
 	"""
 	# we are going to use https://github.com/mengyao/Complete-Striped-Smith-Waterman-Library for SW and SAM output
-	
+	alignmentEx2 = {}
+	alignmentEx3 = {}
 	sw = ssw.Aligner()
 	pool_input = ()
 	for allele,exons in primary.items():
 		alignment = sw.align(str(consensus.seq),exons[0])
-		print alignment.alignment_report()
-
-#		sw.align(consensus.seq,exons[0])
-#		pool_input += ([sw, consensus.seq, str(exons[0])],) 
-
-
-#	mp_pool = multiprocessing.Pool(8)
-#	alignments = mp_pool.map(swAligner, pool_input )
-#	for alg in alignments:
-#		print alg.dump()
-
-	return ["HLA00005","HLA000101"]
+		alignmentEx2[allele] = alignment.score
+		# ditto for exon 3 (TODO: no class-I/class-II checking here)
+		alignment = sw.align(str(consensus.seq),exons[1])
+		alignmentEx3[allele] = alignment.score
+	# sort the dict by values and reverse the result
+	bestEx2 = getBestScoringAlleles( sorted(alignmentEx2.items(),key=operator.itemgetter(1),reverse=True) )
+	bestEx3 = getBestScoringAlleles( sorted(alignmentEx3.items(),key=operator.itemgetter(1),reverse=True) )
+	print list(set(bestEx2) & set(bestEx3))
+	return bestEx2
 
 def selectGenotypesConsideringAllExons(seconday,consensus):
 	return ["HLA00005","HLA000101"]
