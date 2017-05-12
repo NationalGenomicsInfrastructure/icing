@@ -8,6 +8,10 @@ import sys
 import ssw
 import operator
 
+# it is a global variable - once it is refactored to be OO, it will disappear
+# the whole point is to map HLA00005 to HLA*02:01:01:01
+gHLAtypes = {}
+
 def validate_locus(ctx,param,value):
     try:
         assert value in ["HLA-A","HLA-B", "HLA-C", "HLA-DPA1", "HLA-DPB1", "HLA-DQA1", "HLA-DQB1", "HLA-DRA", "HLA-DRB1", "HLA-DRB3", "HLA-DRB4", "HLA-DRB5", "HLA-DRB6", "HLA-DRB7", "HLA-DRB8", "HLA-DRB9"]
@@ -41,7 +45,7 @@ def doGenotype(cons, dat, locus):
 				genotypes = selectGenotypesConsideringIntronsAndUTRs(genotypes, intronsAndUTRs,seq_record)
 			print "Final HLA type for consensus:" 
 			for gt in genotypes:
-				print gt
+				print gHLAtypes[gt]
 
 
 def getCompartmenstForAlleles(fixedIMGT,locus):
@@ -61,6 +65,7 @@ def getCompartmenstForAlleles(fixedIMGT,locus):
 	secondary = {}
 	intronsAndUTRs = {}
 	for seq_record in SeqIO.parse(fixedIMGT,"imgt"):
+		gHLAtypes[seq_record.id] = seq_record.description
 		# if it is the correct locus and there is a sequence record (not a deleted one)
 		if seq_record.description.startswith(locus) and len(seq_record.seq) > 1:
 			primary[seq_record.id] = getPrimaryExons(seq_record, locus)
