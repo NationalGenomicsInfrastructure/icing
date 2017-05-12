@@ -25,7 +25,7 @@ def validate_locus(ctx,param,value):
 @click.option('--locus','-l', type=str, help='the locus [either HLA-A, HLA-B, HLA-DRB1 ...]',default="HLA-A",callback=validate_locus)
 def doGenotype(cons, dat, locus):
     fixedFile = fixIMGTfile(dat)
-    ( primaryExons, secondaryExons, intronsAndUTRs) = getCompartmenstForAlleles(fixedFile,locus)
+    ( primaryExons, secondaryExons, genomicRefs) = getCompartmenstForAlleles(fixedFile,locus)
 	# for each consensus
 	#	preselect types considering only the important exons
 	#	refine the preselected list by checking mismatch in the secondary exons
@@ -34,16 +34,16 @@ def doGenotype(cons, dat, locus):
 		print "Processing consensus: " + seq_record.id
 		# select genotypes considering only the important exons
 		genotypes = preSelectTypes(primaryExons,seq_record)
-		print genotypes
 		if len(genotypes) == 0:		# we have failed for some reason
 			print "Could not find a proper type for consensus"
 		elif len(genotypes) == 1:	# there is a single genotype only: no need to shrink the candidate set
-			print "Final HLA type for consensus: " + genotypes[0]
+			print "Final HLA types for consensus: "
+			print  gHLAtypes[genotypes[0]]
 		else:	# there are more than one type candidates, go for exons
 			genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
 			if len(genotypes) > 1:
-				genotypes = selectGenotypesConsideringIntronsAndUTRs(genotypes, intronsAndUTRs,seq_record)
-			print "Final HLA type for consensus:" 
+				genotypes = selectGenotypesConsideringIntronsAndUTRs(genotypes, genomicRefs, seq_record)
+			print "Final HLA types for consensus:" 
 			for gt in genotypes:
 				print gHLAtypes[gt]
 
@@ -63,17 +63,17 @@ def getCompartmenstForAlleles(fixedIMGT,locus):
 	print "Processing reference IMGT file"
 	primary = {}
 	secondary = {}
-	intronsAndUTRs = {}
+	genomicRefs = {}
 	for seq_record in SeqIO.parse(fixedIMGT,"imgt"):
 		gHLAtypes[seq_record.id] = seq_record.description
 		# if it is the correct locus and there is a sequence record (not a deleted one)
 		if seq_record.description.startswith(locus) and len(seq_record.seq) > 1:
 			primary[seq_record.id] = getPrimaryExons(seq_record, locus)
 			secondary[seq_record.id] = getSecondaryExons(seq_record, locus)
-			intronsAndUTRs[seq_record.id] = getIntronsAndUTRs(seq_record, locus)
+			genomicRefs[seq_record.id] = str(seq_record.seq)
 		
 	print "ready"	
-	return (primary,secondary,intronsAndUTRs)
+	return (primary,secondary,genomicRefs)
 
 def getPrimaryExons(sr,locus):
 	"""
@@ -116,17 +116,6 @@ def getSecondaryExons(sr,locus):
 				exonDict['ex'+f.qualifiers['number'][0] ] = str( sr.seq[f.location.start:f.location.end] )
 		
 	return exonDict
-
-def getIntronsAndUTRs(sr,locus):
-	"""
-	All non-exonic compartments are added
-	"""
-	nonExonsList = []
-	for f in sr.features:
-		if f.type != "exon":
-			nonExonsList.append( sr.seq[f.location.start:f.location.end] )	
-	return nonExonsList
-
 
 def getBestScoringAlleles( sortedTupleList ):
 	"""
@@ -193,8 +182,8 @@ def getCommonExons(genotypes,exons):
 	# as the initial value of the common set, get exons of the first allele
 	print "Searching for common exons"
 	commonExons = set(exons[genotypes[0]].keys())
-	print "starting from "
-	print genotypes[0], commonExons
+#	print "starting from "
+#	print genotypes[0], commonExons
 	for gt in genotypes[0:]:
 		commonExons = commonExons & set( exons[gt].keys() )
 		#print gt,exons[gt].keys(),commonExons
@@ -211,7 +200,7 @@ def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
 	newGenotypes = set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
 	while commonExons:
 		newGenotypes = set(newGenotypes) & getBestScoringAllelesForExon(newGenotypes,commonExons.pop(),secondary,consensus)
-	print "new genotypes: "
+	print " ---------------- new genotypes: ----------------------"
 	print newGenotypes
 	if numOfCandidates == len(newGenotypes):
 		# we were not able to decrease the number of candidates
@@ -223,7 +212,6 @@ def getBestScoringAllelesForExon(genotypes,commonExon,secondary,consensus):
 	exAlign = {}
 	sw = ssw.Aligner()
 	for allele in genotypes:
-		print allele
 		exonSeq = secondary[allele][commonExon]
 		alignment = sw.align(str(consensus.seq),exonSeq)
 		exAlign[allele] = alignment.score
