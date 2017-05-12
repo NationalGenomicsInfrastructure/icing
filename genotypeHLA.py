@@ -7,7 +7,6 @@ import click
 import sys
 import ssw
 import operator
-import multiprocessing
 
 def validate_locus(ctx,param,value):
     try:
@@ -31,12 +30,13 @@ def doGenotype(cons, dat, locus):
 		print "Processing consensus: " + seq_record.id
 		# select genotypes considering only the important exons
 		genotypes = preSelectTypes(primaryExons,seq_record)
+		print genotypes
 		if len(genotypes) == 0:		# we have failed for some reason
 			print "Could not find a proper type for consensus"
 		elif len(genotypes) == 1:	# there is a single genotype only: no need to shrink the candidate set
 			print "Final HLA type for consensus: " + genotypes[0]
 		else:	# there are more than one type candidates, go for exons
-			genotypes = selectGenotypesConsideringAllExons(genotypes, secondaryExons,cons)
+			genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
 			if len(genotypes) > 1:
 				genotypes = selectGenotypesConsideringIntronsAndUTRs(intronsAndUTRs,cons)
 			print "Final HLA type for consensus:" 
@@ -107,7 +107,7 @@ def getSecondaryExons(sr,locus):
 			if locus in ["HLA-A","HLA-B", "HLA-C"] and f.qualifiers['number'][0] not in ['2','3']:
 				exonDict['ex'+f.qualifiers['number'][0] ] = str( sr.seq[f.location.start:f.location.end] )
 			# Class-II and other (all non-Class-I entries)
-			elif locus not in ["HLA-A","HLA-B", "HLA-C"] and f.qualifiers['number'][0] != ['2']:
+			elif locus not in ["HLA-A","HLA-B", "HLA-C"] and f.qualifiers['number'] != ['2']:
 				exonDict['ex'+f.qualifiers['number'][0] ] = str( sr.seq[f.location.start:f.location.end] )
 		
 	return exonDict
@@ -130,8 +130,8 @@ def getBestScoringAlleles( sortedTupleList ):
 	We are returning with a list of best matches:
 	['HLA10395.1','HLA06895.1']
 	"""	
-	bestAlleles = []
 	(firstAllele,bestScore) = sortedTupleList[0]
+	bestAlleles = [firstAllele]
 	for (allele,score) in sortedTupleList[1:]:
 		if bestScore > score:
 			break
@@ -152,31 +152,63 @@ def preSelectTypes(primary,consensus):
 			sort, and keep the best alignments only
 		
 	"""
+	print "Selecting best alleles using primary exons"
 	# we are going to use https://github.com/vishnubob/ssw that is using
 	# https://github.com/mengyao/Complete-Striped-Smith-Waterman-Library for SW and SAM output
 	# unfortunatelly it can not made multiprocess yet, but it is fast enough
 	alignmentEx2 = {}
 	alignmentEx3 = {}
 	sw = ssw.Aligner()
-	pool_input = ()
 	for allele,exons in primary.items():
 		alignment = sw.align(str(consensus.seq),exons[0])
 		alignmentEx2[allele] = alignment.score
 		# ditto for exon 3 (TODO: no class-I/class-II checking here)
 		alignment = sw.align(str(consensus.seq),exons[1])
 		alignmentEx3[allele] = alignment.score
+		print allele + " scores: exon 2: " + str(alignmentEx2[allele]) + " exon 3 " + str(alignmentEx3[allele])
 	# sort the dict by values and reverse the result
 	bestEx2 = getBestScoringAlleles( sorted(alignmentEx2.items(),key=operator.itemgetter(1),reverse=True) )
 	bestEx3 = getBestScoringAlleles( sorted(alignmentEx3.items(),key=operator.itemgetter(1),reverse=True) )
 	# return with the intersect of the two sets, leaving only entries that are in the besty matching set for both exon 2 and exon 3
+	print "done"
 	return list(set(bestEx2) & set(bestEx3))
 
-def getCommonExons(gt,ex):
-	return 1
+def getCommonExons(genotypes,exons):
+	"""
+	genotypes is a list of strings like
+	['HLA10395.1','HLA06895.1']
+	exons is a dict having dicts as values like
+	{	 
+        'HLA10395.1': { 'ex1': seq, 'ex4': seq, 'ex5': seq},
+        'HLA10495.1': { 'ex1': seq, 'ex4': seq, 'ex5': seq},
+        'HLA10355.1': { 'ex1': seq, 'ex4': seq},
+        ...
+    }
+	"""
+	# as the initial value of the common set, get exons of the first allele
+	print "Searching for common exons"
+	commonExons = set(exons[genotypes[0]].keys())
+	print genotypes[0], commonExons
+	for gt in genotypes[0:]:
+		commonExons = commonExons & set( exons[gt].keys() )
+		#print gt,exons[gt].keys(),commonExons
+	return commonExons
 
-def selectGenotypesConsideringAllExons(genotypes,secondary,consensus):
-	commonExons = getCommonExons(genotypes,secondary)	
-	return ["krix","krax"]
+def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
+	# select a set of common exons
+	commonExons = getCommonExons(genotypes,secondary)
+	# select the set of best matching alleles for the very first exon in the list
+	return  set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
+
+def getBestScoringAllelesForExon(genotypes,commonExon,secondary,consensus):
+	exAlign = {}
+	sw = ssw.Aligner()
+	for allele in genotypes:
+		print allele
+		exonSeq = secondary[allele][commonExon]
+		alignment = sw.align(str(consensus.seq),exonSeq)
+		exAlign[allele] = alignment.score
+	return getBestScoringAlleles( sorted(exAlign.items(),key=operator.itemgetter(1),reverse=True) )
 
 def selectGenotypesConsideringIntronsAndUTRs(introns,consensus):
 	return ["krix","krax"]
@@ -213,3 +245,6 @@ def fixIMGTfile(hladat):
 
 if __name__ == "__main__":
 	doGenotype()
+
+#		import pdb
+#		pdb.set_trace()	
