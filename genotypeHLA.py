@@ -31,22 +31,34 @@ def doGenotype(cons, dat, locus):
 	#	refine the preselected list by checking mismatch in the secondary exons
 	#	final touches by looking at the introns/UTRs
     for seq_record in SeqIO.parse(cons,"fasta"):
-		print "Processing consensus: " + seq_record.id
+		print " Start Processing Consensus: " + seq_record.id
+		print "################################################"
 		# select genotypes considering only the important exons
 		genotypes = preSelectTypes(primaryExons,seq_record)
+		success = True	# we will change it for failure
 		if len(genotypes) == 0:		# we have failed for some reason
+			success = False
 			print "Could not find a proper type for consensus"
 		elif len(genotypes) == 1:	# there is a single genotype only: no need to shrink the candidate set
-			print "Final HLA types for consensus: "
+			print "Final HLA type(s) for consensus: "
 			print  gHLAtypes[genotypes[0]]
 		else:	# there are more than one type candidates, go for exons
-			genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
+			try:
+				genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
+			except KeyError:
+				success = False
+				print "***************************** FAILURE **********************************"
+				print "* Could not find a common set of exons for typing. Current candidates: *"
+				print "************************************************************************"
+				printGenotypes(genotypes)
+				print " Fitting genomic sequences for the consensus: "
+			# this part of code is executed all the time:
 			if len(genotypes) > 1:
 				genotypes = selectGenotypesConsideringIntronsAndUTRs(genotypes, genomicRefs, seq_record)
+			print "############## SUCCESS #########################"
 			print "Final HLA types for consensus:" 
-			for gt in genotypes:
-				print gHLAtypes[gt]
-
+			printGenotypes(genotypes)
+			print "################################################"
 
 def getCompartmenstForAlleles(fixedIMGT,locus):
 	"""
@@ -73,6 +85,7 @@ def getCompartmenstForAlleles(fixedIMGT,locus):
 			genomicRefs[seq_record.id] = str(seq_record.seq)
 		
 	print "ready"	
+	print "################################################"
 	return (primary,secondary,genomicRefs)
 
 def getPrimaryExons(sr,locus):
@@ -180,7 +193,6 @@ def getCommonExons(genotypes,exons):
     }
 	"""
 	# as the initial value of the common set, get exons of the first allele
-	print "Searching for common exons"
 	commonExons = set(exons[genotypes[0]].keys())
 #	print "starting from "
 #	print genotypes[0], commonExons
@@ -191,17 +203,22 @@ def getCommonExons(genotypes,exons):
 	print commonExons
 	return commonExons
 
+def printGenotypes(genotypes):
+	for gt in genotypes:
+		print gHLAtypes[gt]
+
 def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
 	# select a set of common exons
 	numOfCandidates = len(genotypes)
 	commonExons = getCommonExons(genotypes,secondary)
 	# select the set of best matching alleles for the very first exon in the list
 	# we have to do it for all exons, but initialize for the first
+	#printGenotypes(genotypes)
 	newGenotypes = set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
 	while commonExons:
 		newGenotypes = set(newGenotypes) & getBestScoringAllelesForExon(newGenotypes,commonExons.pop(),secondary,consensus)
 	print " ---------------- new genotypes: ----------------------"
-	print newGenotypes
+	printGenotypes(list(newGenotypes))
 	if numOfCandidates == len(newGenotypes):
 		# we were not able to decrease the number of candidates
 		return list(newGenotypes)
