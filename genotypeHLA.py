@@ -165,7 +165,7 @@ def preSelectTypes(primary,consensus):
 		# ditto for exon 3 (TODO: no class-I/class-II checking here)
 		alignment = sw.align(str(consensus.seq),exons[1])
 		alignmentEx3[allele] = alignment.score
-		print allele + " scores: exon 2: " + str(alignmentEx2[allele]) + " exon 3 " + str(alignmentEx3[allele])
+		# print allele + " scores: exon 2: " + str(alignmentEx2[allele]) + " exon 3 " + str(alignmentEx3[allele])
 	# sort the dict by values and reverse the result
 	bestEx2 = getBestScoringAlleles( sorted(alignmentEx2.items(),key=operator.itemgetter(1),reverse=True) )
 	bestEx3 = getBestScoringAlleles( sorted(alignmentEx3.items(),key=operator.itemgetter(1),reverse=True) )
@@ -188,10 +188,13 @@ def getCommonExons(genotypes,exons):
 	# as the initial value of the common set, get exons of the first allele
 	print "Searching for common exons"
 	commonExons = set(exons[genotypes[0]].keys())
+	print "starting from "
 	print genotypes[0], commonExons
 	for gt in genotypes[0:]:
 		commonExons = commonExons & set( exons[gt].keys() )
 		#print gt,exons[gt].keys(),commonExons
+	print "Common exons: "
+	print commonExons
 	return commonExons
 
 def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
@@ -199,14 +202,17 @@ def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
 	numOfCandidates = len(genotypes)
 	commonExons = getCommonExons(genotypes,secondary)
 	# select the set of best matching alleles for the very first exon in the list
-	newGenotypes = list (set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus))
+	# we have to do it for all exons, but initialize for the first
+	newGenotypes = set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
+	while commonExons:
+		newGenotypes = set(newGenotypes) & getBestScoringAllelesForExon(newGenotypes,commonExons.pop(),secondary,consensus)
 	print "new genotypes: "
 	print newGenotypes
 	if numOfCandidates == len(newGenotypes):
 		# we were not able to decrease the number of candidates
-		return newGenotypes
+		return list(newGenotypes)
 	else:
-		return selectGenotypesConsideringCommonExons(newGenotypes,secondary,consensus)
+		return selectGenotypesConsideringCommonExons(list(newGenotypes),secondary,consensus)
 
 def getBestScoringAllelesForExon(genotypes,commonExon,secondary,consensus):
 	exAlign = {}
