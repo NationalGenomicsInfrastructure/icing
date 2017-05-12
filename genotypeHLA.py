@@ -38,7 +38,7 @@ def doGenotype(cons, dat, locus):
 		else:	# there are more than one type candidates, go for exons
 			genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
 			if len(genotypes) > 1:
-				genotypes = selectGenotypesConsideringIntronsAndUTRs(intronsAndUTRs,cons)
+				genotypes = selectGenotypesConsideringIntronsAndUTRs(genotypes, intronsAndUTRs,seq_record)
 			print "Final HLA type for consensus:" 
 			for gt in genotypes:
 				print gt
@@ -196,9 +196,17 @@ def getCommonExons(genotypes,exons):
 
 def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
 	# select a set of common exons
+	numOfCandidates = len(genotypes)
 	commonExons = getCommonExons(genotypes,secondary)
 	# select the set of best matching alleles for the very first exon in the list
-	return  set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
+	newGenotypes = list (set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus))
+	print "new genotypes: "
+	print newGenotypes
+	if numOfCandidates == len(newGenotypes):
+		# we were not able to decrease the number of candidates
+		return newGenotypes
+	else:
+		return selectGenotypesConsideringCommonExons(newGenotypes,secondary,consensus)
 
 def getBestScoringAllelesForExon(genotypes,commonExon,secondary,consensus):
 	exAlign = {}
@@ -208,12 +216,11 @@ def getBestScoringAllelesForExon(genotypes,commonExon,secondary,consensus):
 		exonSeq = secondary[allele][commonExon]
 		alignment = sw.align(str(consensus.seq),exonSeq)
 		exAlign[allele] = alignment.score
-	return getBestScoringAlleles( sorted(exAlign.items(),key=operator.itemgetter(1),reverse=True) )
+	return set(getBestScoringAlleles( sorted(exAlign.items(),key=operator.itemgetter(1),reverse=True)) )
 
-def selectGenotypesConsideringIntronsAndUTRs(introns,consensus):
-	return ["krix","krax"]
+def selectGenotypesConsideringIntronsAndUTRs(genotypes,introns,consensus):
+	return genotypes
 	
-
 def fixIMGTfile(hladat):
     """
     For some reason IMGT is not following the standard EMBL format, so we have to add entries to the ID line
