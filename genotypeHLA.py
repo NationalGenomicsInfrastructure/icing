@@ -217,8 +217,17 @@ def getBestScoringAllelesForExon(genotypes,commonExon,secondary,consensus):
 		exAlign[allele] = alignment.score
 	return set(getBestScoringAlleles( sorted(exAlign.items(),key=operator.itemgetter(1),reverse=True)) )
 
-def selectGenotypesConsideringIntronsAndUTRs(genotypes,introns,consensus):
-	return genotypes
+def selectGenotypesConsideringIntronsAndUTRs(genotypes,genomicRefs,consensus):
+	"""
+	Now we are doing something similar as in getBestScoringAllelesForExon(), but for whole sequences
+	"""
+	alleleAlign = {}
+	sw = ssw.Aligner()
+	for allele in genotypes:
+		alleleSeq = genomicRefs[allele]
+		alignment = sw.align(str(consensus.seq),alleleSeq)
+		alleleAlign[allele] = alignment.score
+	return set(getBestScoringAlleles( sorted(alleleAlign.items(),key=operator.itemgetter(1),reverse=True)) )
 	
 def fixIMGTfile(hladat):
     """
