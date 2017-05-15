@@ -7,6 +7,7 @@ import click
 import sys
 import ssw
 import operator
+import os   # for basename
 
 # it is a global variable - once it is refactored to be OO, it will disappear
 # the whole point is to map HLA00005 to HLA*02:01:01:01
@@ -44,6 +45,7 @@ def doGenotype(cons, dat, locus):
 			print  gHLAtypes[genotypes[0]]
 		else:	# there are more than one type candidates, go for exons
 			try:
+	                        print "Selecting best alleles using the whole available CDS" 
 				genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
 			except KeyError:
 				success = False
@@ -54,6 +56,7 @@ def doGenotype(cons, dat, locus):
 				print " Fitting genomic sequences for the consensus: "
 			# this part of code is executed all the time:
 			if len(genotypes) > 1:
+	                        print "Selecting best alleles using genomic sequences" 
 				genotypes = selectGenotypesConsideringIntronsAndUTRs(genotypes, genomicRefs, seq_record)
 			print "############## SUCCESS #########################"
 			print "Final HLA types for consensus:" 
@@ -199,8 +202,8 @@ def getCommonExons(genotypes,exons):
 	for gt in genotypes[0:]:
 		commonExons = commonExons & set( exons[gt].keys() )
 		#print gt,exons[gt].keys(),commonExons
-	print "Common exons: "
-	print commonExons
+#	print "Common exons: "
+#	print commonExons
 	return commonExons
 
 def printGenotypes(genotypes):
@@ -217,8 +220,8 @@ def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
 	newGenotypes = set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
 	while commonExons:
 		newGenotypes = set(newGenotypes) & getBestScoringAllelesForExon(newGenotypes,commonExons.pop(),secondary,consensus)
-	print " ---------------- new genotypes: ----------------------"
-	printGenotypes(list(newGenotypes))
+	#print " ---------------- new genotypes: ----------------------"
+	#printGenotypes(list(newGenotypes))
 	if numOfCandidates == len(newGenotypes):
 		# we were not able to decrease the number of candidates
 		return list(newGenotypes)
@@ -254,7 +257,7 @@ def fixIMGTfile(hladat):
      going to be -> 
     ID   HLA00001; SV 1; standard; DNA; IMGT; HUM; 3503 BP.
     """
-    newFileName = "fixed" + hladat
+    newFileName = "fixed" + os.path.basename(hladat)
     fixedfh = open(newFileName,"w")
          
     with open(hladat,"r") as fh:

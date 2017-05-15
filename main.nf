@@ -10,11 +10,9 @@ fastq = file(params.sample)
 base = fastq.getBaseName()
 reducedRefDir = params.reducedRefDir
 resultSuffix = "_"+base.replaceFirst(/.fastq/, "")+"_"+params.locus
+ref = file(params.ref)
 
-//TODO: get rid of it dcBam = Channel.create()
-//TODO: groi filteredPileup = Channel.create()
-//TODO: groi genChannel = Channel.create()
-//TODO: groi cdsChannel = Channel.create()
+// to save consecutive step statuses (alignment, consensuses, stats) in ICING_... directories
 stepCount = 0
 
 process mapWithALTcontigs {
@@ -149,11 +147,11 @@ process selectConsensusCandidates {
     file cf from consensusFASTA
 
     output:
-    file "*.candidate.fasta" into candidatesFASTA
+    file "*.candidates.fasta" into candidatesFASTA
 
     script:
     """
-    python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
+    python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidates.fasta
     """
 }
 
@@ -161,23 +159,45 @@ process selectConsensusCandidates {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Now we have a list of candidates, try to find the most similar ones.
 
-//process doGenotyping {
-//    tag {params.locus + " " + ref + " " + query }
-//
-//    input:
-//    set file(query) from candidatesFASTA
-//
-//    output:
-//
-//    when: 'genotype' in workflowSteps
-//    script:
-//    """
-//	python genotypeHLA.py -c ${query} -d ${ref} -l ${params.locus}
-//    """
-//}
+process doGenotyping {
+    tag {params.locus + " " + ref }
+    publishDir "ICING_" + incrementSteps() + "_genotypes"+resultSuffix
+
+    input:
+    set file(query) from candidatesFASTA
+
+    output:
+	//file "typing.log"
+	file 'genotypes.txt' into types
+
+    script:
+    """
+	python ${workflow.projectDir}/genotypeHLA.py -c ${query} -d ${ref} -l ${params.locus} > typing.log
+	GT=genotypes.txt
+	echo "#################################################################################################" > \$GT
+	echo "">>\$GT
+	echo "HLA types from sample ${params.sample} and locus ${params.locus}: ">> \$GT
+	echo "">>\$GT
+	grep ^HLA typing.log | sort -u >> \$GT
+	echo "">>\$GT
+	echo "#################################################################################################" >> \$GT
+    """
+}
+types.subscribe {println it.text}
+
+workflow.onComplete { // Display complete message
+		log.info "ICING - MinION HLA typing" 
+		log.info "Command Line: $workflow.commandLine"
+		log.info "Project Dir : $workflow.projectDir"
+		log.info "Launch Dir  : $workflow.launchDir"
+		log.info "Work Dir    : $workflow.workDir"
+		log.info "Completed at: $workflow.complete"
+		log.info "Duration    : $workflow.duration"
+		log.info "Success     : $workflow.success"
+		log.info "Exit status : $workflow.exitStatus"
+}
 
 def incrementSteps() {
 	return ++stepCount
-
 }
 
