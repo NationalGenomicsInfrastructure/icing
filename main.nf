@@ -25,8 +25,12 @@ process mapWithALTcontigs {
 
 	cpus params.threads
 
+	input: 
+	set reads from fastq
+	
 	output:
-	file 'rawALTmaps.bam' into rawALTmaps 
+	file 'rawALTmaps.bam' into rawALTbam
+	file 'rawALTmaps.bam.bai' into rawALTbai
 
 	script:
 	"""
@@ -41,187 +45,122 @@ process mapWithALTcontigs {
 	bwa index -6 alt\${LOCUS}.fasta
 
 	# now we have an index with ALT contigs; do mapping
-    bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 alt\${LOCUS}.fasta ${fastq}|\
+    bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 alt\${LOCUS}.fasta ${reads}|\
 	samtools view --threads ${task.cpus} -bS -T alt\${LOCUS}.fasta -m ${params.minReadLength} - |\
     samtools sort --threads ${task.cpus} -  > rawALTmaps.bam
+	samtools index rawALTmaps.bam
 	"""
 }
 
-//process mapBWA {
-//    tag {params.locus + " " + ref + " " + fastq}
-//
-//    module 'bioinfo-tools'
-//    module 'samtools/1.3'
-//    module 'bwa/0.7.15'
-//
-//    cpus params.threads
-//
-//    input:
-//    file ref from genChannel
-//
-//    output:
-//    file 'HLAXX*.bam' into HLAbam
-//
-//    when: 'align' in workflowSteps
-//    script:
-//    """
-//    set -eo pipefail
-//    bwa index ${ref}
-//    bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 ${ref} ${fastq}|  samtools view --threads ${task.cpus} -bS -T ${ref} -m ${params.minReadLength} - |
-//    samtools sort --threads ${task.cpus} -  > HLAXX`tr -cd '[:alnum:]' < /dev/urandom | fold -w30 | head -n1`.bam
-//    """
-//}
-// we are not using genChannel anymore: close it or it will hang and wait at genotyping
-//genChannel.close()
-//
-//process mergeBAMs {
-//    publishDir "ICING_" + incrementSteps() + "_rawAlignment"+resultSuffix, mode: 'copy'
-//
-//    module 'samtools/1.3'
-//   
-//    input:
-//    file singleBAM from HLAbam.toList()
-//
-//    output:
-//    file "merged.bam" into mergedBAM 
-//
-//    when: 'align' in workflowSteps
-//    script:
-//    """
-//    samtools merge --threads ${task.cpus} merged.bam HLAXX*bam
-//	samtools index merged.bam
-//    """
-//}
-//// here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
-//// generally we are ignoring reads that are containing more mismatches then the 5% of the expected minimal contig size
-//editDistance = params.minContigLength.toInteger()*0.05
-//
-//process filterBestMatchingReads {
-//    publishDir "ICING_" + incrementSteps() + "_bestMatchingReads"+resultSuffix, mode:'copy'
-//    module 'samtools/1.3'
-//    module 'bamtools/2.4.1'
-//
-//    input:
-//    file bam from mergedBAM
-//
-//    output:
-//    file "filtered_${bam}" into filteredBam
-//    file "filtered_${bam}.bai" into filteredBai
-//
-//    when: 'align' in workflowSteps
-//    script:
-//    """
-//    samtools view -h -bS ${bam} | bamtools filter -tag "NM:<${editDistance}" -in - -out "filtered_"${bam} 
-//	samtools index "filtered_"${bam}
-//    """
-//}
-//
-//// Here we are running some stats on the bam files and trying to get only alleles
-//// with nice coverage. The rest of the crap is thrown away
-//process selectAllelesWithDecentCoverage {
-//    publishDir "ICING_" + incrementSteps() + "_goodCoverage"+resultSuffix
-//    module 'samtools/1.3'
-//
-//    input:
-//    file fbam from filteredBam
-//
-//    output:
-//    file "candidate.stats" into stats
-//    file "mergedDC.bam" into dcBam
-//    file "mergedDC.bam.bai"
-//    
-//    when: 'align' in workflowSteps
-//    script:
-//    """
-//    # - get the allele names from the BAM header, 
-//    # - calculate coverage depth for each position of each allele, but only using reads that are at least minReadLength long
-//    # - calculate statistics, and select the best 16 alleles (no point to get more)
-//    # - create a BAM file that contains only long reads and the best alleles
-//    SCRIPTDIR=`dirname ${workflow.scriptFile}`
-//    samtools index ${fbam}
-//    for allele in `samtools view -H ${fbam} | awk '/^@SQ/{print \$2}'| sed 's/SN://g'`; do 
-//                samtools depth -a -l ${params.minReadLength} ${fbam} -r \${allele}: > \${allele}.coverage; 
-//                python \${SCRIPTDIR}/binCoverage.py -f \${allele}.coverage; 
-//    done | sort -k3n | tail -16 > candidate.stats
-//    for allele in `awk '{print \$1}' candidate.stats`; do 
-//        samtools view -hb ${fbam} \${allele}: > FHB\${allele}.bam
-//    done
-//    samtools merge mergedDC.bam FHB*bam
-//	samtools index mergedDC.bam
-//    """
-//}
-//// END OF ALIGNMENT
-////////////////////////////////////////    expecting a BAM        ////////////////////////////////////////
-//if('genotype' in workflowSteps) {
-//    if(params.bam) {
-//        dcBam = Channel.fromPath(params.bam)
-//    }
-//} else {
-//    dcBam.close()
-//}
-//
-//process makePileUp {
-//    publishDir "ICING_" + incrementSteps() + "_pileup"+resultSuffix, mode:'copy'
-//    module 'samtools/1.3'
-//
-//    input: 
-//    file fb from dcBam 
-//
-//    output:
-//    file "${base}.pileup" into filteredPileup
-//
-//    when: 'genotype' in workflowSteps
-//    script:
-//    """
-//    samtools mpileup -B -d 1000 -Q 10 -A ${fb} > ${base}.pileup
-//    """
-//}
-//
-////////////////////////////////////////    expecting a pileup      ////////////////////////////////////////
-//if('genotype' in workflowSteps) {
-//    if(params.pileup) {
-//        filteredPileup = Channel.fromPath(params.pileup)
-//    }
-//} else {
-//    filteredPileup.close()
-//}
+// here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
+// generally we are ignoring reads that are containing more mismatches then the 5% of the expected minimal contig size
+editDistance = params.minContigLength.toInteger()*0.05
+
+process filterBestMatchingReads {
+    publishDir "ICING_" + incrementSteps() + "_bestMatchingReads"+resultSuffix, mode:'copy'
+    module 'samtools/1.3'
+    module 'bamtools/2.4.1'
+
+    input:
+    file bam from rawALTbam
+
+    output:
+    file "filtered_${bam}" into filteredBam
+    file "filtered_${bam}.bai" into filteredBai
+
+    script:
+    """
+    samtools view -h -bS ${bam} | bamtools filter -tag "NM:<${editDistance}" -in - -out "filtered_"${bam} 
+	samtools index "filtered_"${bam}
+    """
+}
+
+// Here we are running some stats on the bam files and trying to get only alleles
+// with nice coverage. The rest of the crap is thrown away
+process selectAllelesWithDecentCoverage {
+    publishDir "ICING_" + incrementSteps() + "_goodCoverage"+resultSuffix
+    module 'samtools/1.3'
+
+    input:
+    file fbam from filteredBam
+
+    output:
+    file "candidate.stats" into stats
+    file "mergedDC.bam" into dcBam
+    file "mergedDC.bam.bai"
+    
+    script:
+    """
+    # - get the allele names from the BAM header, 
+    # - calculate coverage depth for each position of each allele, but only using reads that are at least minReadLength long
+    # - calculate statistics, and select the best 16 alleles (no point to get more)
+    # - create a BAM file that contains only long reads and the best alleles
+    SCRIPTDIR=`dirname ${workflow.scriptFile}`
+    samtools index ${fbam}
+    for allele in `samtools view -H ${fbam} | awk '/^@SQ/{print \$2}'| sed 's/SN://g'`; do 
+                samtools depth -a -l ${params.minReadLength} ${fbam} -r \${allele}: > \${allele}.coverage; 
+                python \${SCRIPTDIR}/binCoverage.py -f \${allele}.coverage; 
+    done | sort -k3n | tail -16 > candidate.stats
+    for allele in `awk '{print \$1}' candidate.stats`; do 
+        samtools view -hb ${fbam} \${allele}: > FHB\${allele}.bam
+    done
+    samtools merge mergedDC.bam FHB*bam
+	samtools index mergedDC.bam
+    """
+}
+// END OF ALIGNMENT
+process makePileUp {
+    publishDir "ICING_" + incrementSteps() + "_pileup"+resultSuffix, mode:'copy'
+    module 'samtools/1.3'
+
+    input: 
+    file fb from dcBam 
+
+    output:
+    file "${base}.pileup" into filteredPileup
+
+    script:
+    """
+    samtools mpileup -B -d 1000 -Q 10 -A ${fb} > ${base}.pileup
+    """
+}
+
+//////////////////////////////////////    expecting a pileup      ////////////////////////////////////////
 //filteredPileup = filteredPileup.view{"Pileup from filtered reads: " + it}
-//process getConsensuses {
-//    publishDir "ICING_" + incrementSteps() + "_rawCons"+resultSuffix
-//
-//    input:
-//    file pileup from filteredPileup
-//
-//    output:
-//    file "cons.fasta" into consensusFASTA
-//
-//    when: 'genotype' in workflowSteps
-//    script: 
-//    """
-//    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d ${params.minCoverage} > cons.fasta 
-//    """
-//} 
-//
-//process selectConsensusCandidates {
-//    publishDir "ICING_" + incrementSteps() + "_candidates"+resultSuffix
-//
-//    input:
-//    file cf from consensusFASTA
-//
-//    output:
-//    file "*.candidate.fasta" into candidatesFASTA
-//
-//    when: 'genotype' in workflowSteps
-//    script:
-//    """
-//    python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
-//    """
-//}
-//
-////////////////////////////////////////    expecting a consensus FASTA   ////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////////////////////////
-//// Now we have a list of candidates, try to find the most similar ones.
-//
+process getConsensuses {
+    publishDir "ICING_" + incrementSteps() + "_rawCons"+resultSuffix
+
+    input:
+    file pileup from filteredPileup
+
+    output:
+    file "cons.fasta" into consensusFASTA
+
+    script: 
+    """
+    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d ${params.minCoverage} > cons.fasta 
+    """
+} 
+
+process selectConsensusCandidates {
+    publishDir "ICING_" + incrementSteps() + "_candidates"+resultSuffix
+
+    input:
+    file cf from consensusFASTA
+
+    output:
+    file "*.candidate.fasta" into candidatesFASTA
+
+    script:
+    """
+    python ${workflow.projectDir}/selectCandidate.py -f ${cf} -l ${params.minContigLength} > ${base}.candidate.fasta
+    """
+}
+
+//////////////////////////////////////    expecting a consensus FASTA   ////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Now we have a list of candidates, try to find the most similar ones.
+
 //process doGenotyping {
 //    tag {params.locus + " " + ref + " " + query }
 //
