@@ -2,9 +2,14 @@
 workflow.onError { // Display error message
     log.info "ICING: MinION HLA Genotyping"
     log.info "Usage (default values in [], aiming for Class-I typing ):"
-    log.info "nextflow run main.nf --reducedRefDir /dir/to/HLA*fasta  --ref hla.dat --locus locus --sample file.fastq [ --minReadLength [2000] --minContigLength [3000] --threads [8] ]"
+    log.info "nextflow run main.nf --reducedRefDir /dir/to/HLA*fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] ]"
     log.info "Workflow execution stopped with the following message: " + workflow.errorMessage
 }
+
+
+if(!params.minCoverage) {params.minCoverage = 40}
+if(!params.minReadLength) {params.minReadLength = 2000}
+if(!params.minContigLength) {params.minContigLength = 3000}
 
 fastq = file(params.sample)
 base = fastq.getBaseName()
@@ -167,7 +172,7 @@ process doGenotyping {
     set file(query) from candidatesFASTA
 
     output:
-	//file "typing.log"
+	file "typing.log"
 	file 'genotypes.txt' into types
 
     script:
