@@ -41,8 +41,11 @@ process mapWithALTcontigs {
 	LOCUS=${params.locus}
 	
 	# first make an ALT-aware index
-	FIRSTALT=`ls ${reducedRefDir}/HLA*fasta|head -1`
 	cat ${reducedRefDir}/HLA*fasta > alt\${LOCUS}.fasta
+	# we need this funny sort of variable creation since sometimes there are simply 
+	# too many files and ls fails, xargs can not rescue the arg list
+	FIRSTALT=`awk '/>/{print \$1; exit 0}' altHLA-C.fasta |sed 's/>//'`".fasta"
+	cp ${reducedRefDir}/\${FIRSTALT} .
 	bwa index \$FIRSTALT
 	bwa mem -a \$FIRSTALT alt\${LOCUS}.fasta > alt\${LOCUS}.fasta.64.alt 
 	bwa index -6 alt\${LOCUS}.fasta
