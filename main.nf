@@ -2,7 +2,7 @@
 workflow.onError { // Display error message
     log.info "ICING: MinION HLA Genotyping"
     log.info "Usage (default values in [], aiming for Class-I typing ):"
-    log.info "nextflow run main.nf --genomicRef A_gen.fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] ]"
+    log.info "nextflow run main.nf --genomicRef A_gen.fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] --bam <alignments.bam>]"
     log.info "Workflow execution stopped with the following message: " + workflow.errorMessage
 }
 
@@ -19,6 +19,7 @@ ref = file(params.ref)
 
 // to save consecutive step statuses (alignment, consensuses, stats) in ICING_... directories
 stepCount = 0
+rawALTbam = Channel.create()
 
 process mapWithALTcontigs {
     tag {params.locus + " " + params.sample + " ALT"}
@@ -35,6 +36,8 @@ process mapWithALTcontigs {
 	file 'rawALTmaps.bam' into rawALTbam
 	file 'rawALTmaps.bam.bai' into rawALTbai
 
+	// if we do not have a BAM with aligned reads, run alignment
+	when: !file(params.bam)
 	script:
 	"""
     set -eo pipefail
@@ -60,6 +63,9 @@ process mapWithALTcontigs {
 // here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
 // generally we are ignoring reads that are containing more mismatches then the 5% of the expected minimal contig size
 editDistance = params.minContigLength.toInteger()*0.05
+if(file(params.bam)) {
+	rawALTbam = Channel.fromPath(params.bam)
+}
 
 process filterBestMatchingReads {
     publishDir "ICING_" + incrementSteps() + "_bestMatchingReads"+resultSuffix, mode:'copy'
