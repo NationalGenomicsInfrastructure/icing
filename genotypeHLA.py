@@ -35,7 +35,7 @@ def doGenotype(cons, dat, locus):
 		print " Start Processing Consensus: " + seq_record.id
 		print "################################################"
 		# select genotypes considering only the important exons
-		genotypes = preSelectTypes(primaryExons,seq_record)
+		genotypes = preSelectTypes(primaryExons,seq_record,locus)
 		success = True	# we will change it for failure
 		if len(genotypes) == 0:		# we have failed for some reason
 			success = False
@@ -150,7 +150,7 @@ def getBestScoringAlleles( sortedTupleList ):
 	return bestAlleles	 
 
 
-def preSelectTypes(primary,consensus):
+def preSelectTypes(primary,consensus, locus):
 	"""
 	For each primary exon (or exon pair)
 		make an alignment for exon 2, and put the result into a dictionary as alignmentEx2['allele'] = #score 
@@ -166,22 +166,27 @@ def preSelectTypes(primary,consensus):
 	# we are going to use https://github.com/vishnubob/ssw that is using
 	# https://github.com/mengyao/Complete-Striped-Smith-Waterman-Library for SW and SAM output
 	# unfortunatelly it can not made multiprocess yet, but it is fast enough
+        isClassI = locus in ["HLA-A","HLA-B", "HLA-C"]
 	alignmentEx2 = {}
 	alignmentEx3 = {}
 	sw = ssw.Aligner()
 	for allele,exons in primary.items():
 		alignment = sw.align(str(consensus.seq),exons[0])
 		alignmentEx2[allele] = alignment.score
-		# ditto for exon 3 (TODO: no class-I/class-II checking here)
-		alignment = sw.align(str(consensus.seq),exons[1])
-		alignmentEx3[allele] = alignment.score
+		# ditto for exon 3 if it is not a Class-I
+                if isClassI:
+		    alignment = sw.align(str(consensus.seq),exons[1])
+		    alignmentEx3[allele] = alignment.score
 		# print allele + " scores: exon 2: " + str(alignmentEx2[allele]) + " exon 3 " + str(alignmentEx3[allele])
 	# sort the dict by values and reverse the result
 	bestEx2 = getBestScoringAlleles( sorted(alignmentEx2.items(),key=operator.itemgetter(1),reverse=True) )
-	bestEx3 = getBestScoringAlleles( sorted(alignmentEx3.items(),key=operator.itemgetter(1),reverse=True) )
+        if isClassI:
+	    bestEx3 = getBestScoringAlleles( sorted(alignmentEx3.items(),key=operator.itemgetter(1),reverse=True) )
 	# return with the intersect of the two sets, leaving only entries that are in the besty matching set for both exon 2 and exon 3
+        # or exon 2 only for other than Class-I alleles
 	print "done"
-	return list(set(bestEx2) & set(bestEx3))
+        return list(set(bestEx2) & set(bestEx3)) if isClassI else bestEx2
+
 
 def getCommonExons(genotypes,exons):
 	"""
