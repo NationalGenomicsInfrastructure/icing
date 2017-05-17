@@ -20,6 +20,9 @@ ref = file(params.ref)
 // to save consecutive step statuses (alignment, consensuses, stats) in ICING_... directories
 stepCount = 0
 rawALTbam = Channel.create()
+hasBam = params.bam
+//bamFile = file(params.bam)
+//hasBam = bamFile.exists()
 
 process mapWithALTcontigs {
     tag {params.locus + " " + params.sample + " ALT"}
@@ -37,7 +40,7 @@ process mapWithALTcontigs {
 	file 'rawALTmaps.bam.bai' into rawALTbai
 
 	// if we do not have a BAM with aligned reads, run alignment
-	when: !file(params.bam)
+	when: !hasBam
 	script:
 	"""
     set -eo pipefail
@@ -63,7 +66,7 @@ process mapWithALTcontigs {
 // here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
 // generally we are ignoring reads that are containing more mismatches then the 5% of the expected minimal contig size
 editDistance = params.minContigLength.toInteger()*0.05
-if(file(params.bam)) {
+if(hasBam) {
 	rawALTbam = Channel.fromPath(params.bam)
 }
 
