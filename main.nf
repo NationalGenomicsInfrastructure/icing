@@ -2,7 +2,7 @@
 workflow.onError { // Display error message
     log.info "ICING: MinION HLA Genotyping"
     log.info "Usage (default values in [], aiming for Class-I typing ):"
-    log.info "nextflow run main.nf --reducedRefDir /dir/to/HLA*fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] ]"
+    log.info "nextflow run main.nf --genomicRef A_gen.fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] ]"
     log.info "Workflow execution stopped with the following message: " + workflow.errorMessage
 }
 
@@ -13,7 +13,7 @@ if(!params.minContigLength) {params.minContigLength = 3000}
 
 fastq = file(params.sample)
 base = fastq.getBaseName()
-reducedRefDir = params.reducedRefDir
+genomicRef = file(params.genomicRef)
 resultSuffix = "_"+base.replaceFirst(/.fastq/, "")+"_"+params.locus
 ref = file(params.ref)
 
@@ -41,11 +41,10 @@ process mapWithALTcontigs {
 	LOCUS=${params.locus}
 	
 	# first make an ALT-aware index
-	cat ${reducedRefDir}/HLA*fasta > alt\${LOCUS}.fasta
-	# we need this funny sort of variable creation since sometimes there are simply 
-	# too many files and ls fails, xargs can not rescue the arg list
-	FIRSTALT=`awk '/>/{print \$1; exit 0}' altHLA-C.fasta |sed 's/>//'`".fasta"
-	cp ${reducedRefDir}/\${FIRSTALT} .
+	cp ${params.genomicRef} alt\${LOCUS}.fasta
+	# get the very first genomic sequence
+	FIRSTALT=`awk '/>/{print \$1; exit 0}' alt\${LOCUS}.fasta |sed 's/>//'`".fasta"
+	awk '/>/{print;getline;while(\$1!~/>/){getline;print}exit 0}' alt\${LOCUS}.fasta> \$FIRSTALT
 	bwa index \$FIRSTALT
 	bwa mem -a \$FIRSTALT alt\${LOCUS}.fasta > alt\${LOCUS}.fasta.64.alt 
 	bwa index -6 alt\${LOCUS}.fasta
