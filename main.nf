@@ -1,7 +1,7 @@
 #!/usr/bin/env nextflow
 workflow.onError { // Display error message
     log.info "ICING: MinION HLA Genotyping"
-    log.info "Usage (default values in [], aiming for Class-I typing ):"
+    log.info "Usage (default values in [], aiming for Class-I typing):"
     log.info "nextflow run main.nf --genomicRef A_gen.fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] --bam <alignments.bam>]"
     log.info "Workflow execution stopped with the following message: " + workflow.errorMessage
 }
@@ -10,6 +10,8 @@ workflow.onError { // Display error message
 if(!params.minCoverage) {params.minCoverage = 40}
 if(!params.minReadLength) {params.minReadLength = 2000}
 if(!params.minContigLength) {params.minContigLength = 3000}
+if(!params.editDistance ) {params.editDistance = params.minContigLength.toInteger()*0.05}
+println params
 
 fastq = file(params.sample)
 base = fastq.getBaseName()
@@ -21,8 +23,7 @@ ref = file(params.ref)
 stepCount = 0
 rawALTbam = Channel.create()
 hasBam = params.bam
-//bamFile = file(params.bam)
-//hasBam = bamFile.exists()
+hasEditDistance = params.editDistance
 
 process mapWithALTcontigs {
     tag {params.locus + " " + params.sample + " ALT"}
@@ -65,7 +66,6 @@ process mapWithALTcontigs {
 
 // here we are getting rid of reads that are matching the reference, but are aligned with many mismatches (high edit distance)
 // generally we are ignoring reads that are containing more mismatches then the 5% of the expected minimal contig size
-editDistance = params.minContigLength.toInteger()*0.05
 if(hasBam) {
 	rawALTbam = Channel.fromPath(params.bam)
 }
@@ -84,7 +84,7 @@ process filterBestMatchingReads {
 
     script:
     """
-    samtools view -h -bS ${bam} | bamtools filter -tag "NM:<${editDistance}" -in - -out "filtered_"${bam} 
+    samtools view -h -bS ${bam} | bamtools filter -tag "NM:<${params.editDistance}" -in - -out "filtered_"${bam} 
 	samtools index "filtered_"${bam}
     """
 }
