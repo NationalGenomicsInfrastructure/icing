@@ -2,12 +2,12 @@
 workflow.onError { // Display error message
     log.info "ICING: MinION HLA Genotyping"
     log.info "Usage (default values in [], aiming for Class-I typing):"
-    log.info "nextflow run main.nf --genomicRef A_gen.fasta  --ref hla.dat --locus locus --sample file.fastq [ --minCoverage [50] --minReadLength [2000] --minContigLength [3000] --threads [8] --bam <alignments.bam>]"
+    log.info "nextflow run main.nf --genomicRef A_gen.fasta  --ref hla.dat --locus locus --sample file.fastq [ --minPileupVote [40] --minReadLength [2000] --minContigLength [3000] --threads [8] --bam <alignments.bam>]"
     log.info "Workflow execution stopped with the following message: " + workflow.errorMessage
 }
 
 
-if(!params.minCoverage) {params.minCoverage = 40}
+if(!params.minPileupVote) {params.minPileupVote = 40}
 if(!params.minReadLength) {params.minReadLength = 2000}
 if(!params.minContigLength) {params.minContigLength = 3000}
 if(!params.editDistance ) {params.editDistance = params.minContigLength.toInteger()*0.05}
@@ -57,7 +57,8 @@ process mapWithALTcontigs {
 	bwa index -6 alt\${LOCUS}.fasta
 
 	# now we have an index with ALT contigs; do mapping
-    bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 alt\${LOCUS}.fasta ${reads}|\
+    #bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 alt\${LOCUS}.fasta ${reads}|
+    bwa mem -t ${task.cpus} -x ont2d alt\${LOCUS}.fasta ${reads}|\
 	samtools view --threads ${task.cpus} -bS -T alt\${LOCUS}.fasta -m ${params.minReadLength} - |\
     samtools sort --threads ${task.cpus} -  > rawALTmaps.bam
 	samtools index rawALTmaps.bam
@@ -115,6 +116,7 @@ process selectAllelesWithDecentCoverage {
                 samtools depth -a -l ${params.minReadLength} ${fbam} -r \${allele}: > \${allele}.coverage; 
                 python \${SCRIPTDIR}/binCoverage.py -f \${allele}.coverage; 
     done | sort -k3n | tail -16 > candidate.stats
+    #done | sort -k3n > candidate.stats
     for allele in `awk '{print \$1}' candidate.stats`; do 
         samtools view -hb ${fbam} \${allele}: > FHB\${allele}.bam
     done
@@ -152,7 +154,7 @@ process getConsensuses {
 
     script: 
     """
-    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d ${params.minCoverage} > cons.fasta 
+    python ${workflow.projectDir}/makeConsensusFromPileup.py -p ${pileup} -d ${params.minPileupVote} > cons.fasta 
     """
 } 
 
