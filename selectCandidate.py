@@ -1,4 +1,4 @@
-# Selecting the best HLA consensus sequences from a samtools pileup consensus FASTQ
+# Selecting the best HLA consensus sequences from a samtools pileup consensus FASTA
 import click
 import copy
 from Bio import SeqIO
