@@ -57,8 +57,8 @@ process mapWithALTcontigs {
 	bwa index -6 alt\${LOCUS}.fasta
 
 	# now we have an index with ALT contigs; do mapping
-    #bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 alt\${LOCUS}.fasta ${reads}|
-    bwa mem -t ${task.cpus} -x ont2d alt\${LOCUS}.fasta ${reads}|\
+    #bwa mem -t ${task.cpus} -x ont2d alt\${LOCUS}.fasta ${reads}|
+    bwa mem -t ${task.cpus} -a -k 70 -W100 -r10 -A1 -B1 -O1 -E1 -L0 alt\${LOCUS}.fasta ${reads}|\
 	samtools view --threads ${task.cpus} -bS -T alt\${LOCUS}.fasta -m ${params.minReadLength} - |\
     samtools sort --threads ${task.cpus} -  > rawALTmaps.bam
 	samtools index rawALTmaps.bam
