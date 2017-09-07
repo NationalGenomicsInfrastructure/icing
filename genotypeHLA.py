@@ -36,6 +36,8 @@ def doGenotype(cons, dat, locus):
 		print "################################################"
 		# select genotypes considering only the important exons
 		genotypes = preSelectTypes(primaryExons,seq_record,locus)
+                print "___________________PRESELECTED_____________________"
+		printGenotypes(genotypes)
 		success = True	# we will change it for failure
 		if len(genotypes) == 0:		# we have failed for some reason
 			success = False
@@ -47,6 +49,8 @@ def doGenotype(cons, dat, locus):
 			try:
 	                        print "Selecting best alleles using the whole available CDS" 
 				genotypes = selectGenotypesConsideringCommonExons(genotypes, secondaryExons,seq_record)
+                                print "___________________PRESELECTED_____________________"
+                                printGenotypes(genotypes)
 			except KeyError:
 				success = False
 				print "***************************** FAILURE **********************************"
@@ -217,11 +221,13 @@ def printGenotypes(genotypes):
 
 def selectGenotypesConsideringCommonExons(genotypes,secondary,consensus):
 	# select a set of common exons
+        print "________________ITERATING ON COMMON EXONS____________________"
 	numOfCandidates = len(genotypes)
 	commonExons = getCommonExons(genotypes,secondary)
+        print commonExons
 	# select the set of best matching alleles for the very first exon in the list
 	# we have to do it for all exons, but initialize for the first
-	#printGenotypes(genotypes)
+	printGenotypes(genotypes)
 	newGenotypes = set(genotypes) & getBestScoringAllelesForExon(genotypes,commonExons.pop(),secondary,consensus)
 	while commonExons:
 		newGenotypes = set(newGenotypes) & getBestScoringAllelesForExon(newGenotypes,commonExons.pop(),secondary,consensus)

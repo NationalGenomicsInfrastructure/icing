@@ -196,7 +196,8 @@ process doGenotyping {
 	echo "">>\$GT
 	echo "HLA types from sample ${params.sample} and locus ${params.locus}: ">> \$GT
 	echo "">>\$GT
-	grep ^HLA typing.log | sort -u >> \$GT
+	# while we have some results and we are not at the EOF
+	awk '/Final/{while(/HLA/ && getline == 1){if(/HLA/)print}}' typing.log | sort -u >> \$GT
 	echo "">>\$GT
 	echo "#################################################################################################" >> \$GT
     """
