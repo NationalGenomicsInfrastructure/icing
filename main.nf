@@ -6,7 +6,6 @@ workflow.onError { // Display error message
     log.info "Workflow execution stopped with the following message: " + workflow.errorMessage
 }
 
-
 if(!params.minPileupVote) {params.minPileupVote = 40}
 if(!params.minReadLength) {params.minReadLength = 2000}
 if(!params.minContigLength) {params.minContigLength = 3000}
@@ -34,7 +33,7 @@ process mapWithALTcontigs {
 	cpus params.threads
 
 	input: 
-	set reads from fastq
+	file reads from fastq
 	
 	output:
 	file 'rawALTmaps.bam' into rawALTbam
@@ -182,7 +181,7 @@ process doGenotyping {
     publishDir "ICING_" + incrementSteps() + "_genotypes"+resultSuffix
 
     input:
-    set file(query) from candidatesFASTA
+    file query from candidatesFASTA
 
     output:
 	file "typing.log"
@@ -197,7 +196,7 @@ process doGenotyping {
 	echo "HLA types from sample ${params.sample} and locus ${params.locus}: ">> \$GT
 	echo "">>\$GT
 	# while we have some results and we are not at the EOF
-	awk '/Final/{while(/HLA/ && getline == 1){if(/HLA/)print}}' typing.log | sort -u >> \$GT
+	awk '/Final/{while(/HLA/ && getline == 1){if(/^HLA/)print}}' typing.log | sort -u >> \$GT
 	echo "">>\$GT
 	echo "#################################################################################################" >> \$GT
     """
