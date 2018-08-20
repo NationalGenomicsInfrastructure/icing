@@ -6,7 +6,7 @@ import click
 @click.option('--pileup','-p', type=str, help='The pileup file to use for consensus generation')
 @click.option('--depth', '-d', type=int, help='Minimal expected depth. With coverage lower than this N will be inserted (default = 10).', default=10)
 @click.option('--nonN', '-n', type=float, help='Minimal expected percentage of non-N bases. (default = 90.0).', default=90.0)
-def makeConsensus(pileup,depth, nonn):
+def makeConsensus(pileup, depth, nonn):
     """
     Utility to make a consensus from samtools pileup. Use samtools as
     samtools mpileup -B -d 1000 -Q 10 -A  file.bam > file.pileup
@@ -40,9 +40,10 @@ def printOutFASTA(seqId, seqStr, nonn):
 	We are writing out sequences that are containing at least nonN% of non-N parts. 
 	I. e. if the sequence is ACCTGANNNN and we have a 90% limit, it will not be printed out.
 	"""
-	if( float(len(seqStr) - seqStr.count("N"))/float(len(seqStr)) >= nonn/100.0):
-		print(">" + seqId)
-		print(seqStr)#,end='')
+        percentN = 1.0 - float(len(seqStr) - seqStr.count("N"))/float(len(seqStr))
+	if(percentN <= 1.0 - nonn/100.0):
+            print(">" + seqId + " Ns: " + str(percentN))
+            print(seqStr)#,end='')
     
 def getMostCommonBase(aPileup):
     pl = aPileup.upper()
